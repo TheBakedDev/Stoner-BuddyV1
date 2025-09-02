@@ -1,4 +1,5 @@
 #===== Stoner Buddy V1 Code, OG code before I started the revamp ====
+#===== For now this work's but with the new version you need to RENAME THE FILE TO Stoner_Buddy.py
 
 import random
 
