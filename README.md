@@ -47,3 +47,8 @@ Clone this repo and install requirements:
 git clone https://github.com/TheBakedDev/Stoner-BuddyV1
 cd stoner-buddy
 pip install -r requirements.txt
+
+<p align="center">
+  <img src="assets/banner.png" alt="Stoner Buddy Discord Bot" width="100%">
+</p>
+
