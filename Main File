@@ -1,0 +1,40 @@
+#===== Stoner Buddy V1 Code, OG code before I started the revamp ====
+
+import random
+
+print("🔥 Welcome to Stoner Buddy 🔥")
+print("Your chill coding companion is ready...\n")
+
+# Some random stoner wisdoms
+wisdoms = [
+    "If you drop your joint, it’s just the earth taking its hit.",
+    "Time is an illusion, but Doritos are forever.",
+    "Don’t chase the high, let the high chase you.",
+    "Every snack is a meal if you believe in yourself.",
+    "The blunt chooses the smoker, not the other way around."
+]
+
+# Some random munchie suggestions
+munchies = [
+    "pizza rolls",
+    "a whole box of cereal",
+    "chocolate chip cookies",
+    "nachos with way too much cheese",
+    "ice cream straight from the tub"
+]
+
+# Random greetings
+greetings = [
+    "Yo, buddy!",
+    "What’s up, legend?",
+    "Hey hey, space traveler!",
+    "Namaste, munchie master!"
+]
+
+# The program in action
+name = input("First off, what should I call you? ")
+
+print("\n" + random.choice(greetings), name + " 👋")
+print("Here’s your wisdom for today:")
+print("✨", random.choice(wisdoms))
+print("\nAlso... maybe grab some", random.choice(munchies), "😋")
