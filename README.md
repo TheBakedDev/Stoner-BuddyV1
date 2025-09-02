@@ -1,4 +1,7 @@
-# 🌿 Stoner Buddy 🌿
+<p align="center">
+  <img src="Banner.png" alt="Stoner Buddy Discord Bot" width="100%">
+</p>
+
 # Stoner Buddy V3.2.7 Install
 
 **Stoner Buddy** is a Discord bot built for chill vibes, laughs, and stoner-friendly fun.  
@@ -47,8 +50,3 @@ Clone this repo and install requirements:
 git clone https://github.com/TheBakedDev/Stoner-BuddyV1
 cd stoner-buddy
 pip install -r requirements.txt
-
-<p align="center">
-  <img src="assets/banner.png" alt="Stoner Buddy Discord Bot" width="100%">
-</p>
-
