@@ -1,41 +1,2807 @@
-#===== Stoner Buddy V1 Code, OG code before I started the revamp ====
-#===== For now this work's but with the new version you need to RENAME THE FILE TO Stoner_Buddy.py
+# This is the stoner buddy discord bot! Made by me! I'm still new so this might be crazy to view lol
 
+
+import os
+import sys
+import json
+import time
+import asyncio
 import random
+from pathlib import Path
+from datetime import datetime, timezone
+from pathlib import Path
+import asyncio
+import discord
+from discord import app_commands
 
-print("🔥 Welcome to Stoner Buddy 🔥")
-print("Your chill coding companion is ready...\n")
+import asyncio
+from collections import deque
 
-# Some random stoner wisdoms
-wisdoms = [
+DEV_GUILD_ID = int(os.getenv("DEV_GUILD_ID", "0"))
+
+
+
+import discord
+from discord import app_commands
+from discord.ui import View, Button, Select
+from dotenv import load_dotenv
+
+import math
+import requests  # ensure this is imported
+
+OSM_USER_AGENT = "Youremail@email.com"  # set a contact email or site
+
+
+#===========For Music queue, save, delete======
+
+from datetime import datetime, timezone
+import re, json, urllib.parse
+
+PLAYLISTS_DIR = Path(__file__).parent / "playlists"
+PLAYLISTS_DIR.mkdir(exist_ok=True)
+MAX_PLAYLIST_LEN = 20  # cap to keep queues sane
+
+def _slugify(name: str) -> str:
+    s = name.strip().lower()
+    s = re.sub(r"[^a-z0-9 _-]", "", s)
+    s = re.sub(r"\s+", "-", s)
+    return s[:40] if s else "playlist"
+
+def _pl_path(guild_id: int, name: str) -> Path:
+    return PLAYLISTS_DIR / f"{guild_id}_{_slugify(name)}.json"
+
+def _pl_list_for_guild(guild_id: int) -> list[str]:
+    out = []
+    for p in PLAYLISTS_DIR.glob(f"{guild_id}_*.json"):
+        out.append(p.stem.split("_", 1)[1])  # slug only
+    return sorted(out)
+
+def _pl_save(guild_id: int, name: str, tracks: list[dict], author_id: int):
+    data = {
+        "name": name,
+        "slug": _slugify(name),
+        "guild_id": guild_id,
+        "created_by": author_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "tracks": tracks[:MAX_PLAYLIST_LEN],
+    }
+    with _pl_path(guild_id, name).open("w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+def _pl_load(guild_id: int, name: str) -> dict | None:
+    p = _pl_path(guild_id, name)
+    if not p.exists():
+        return None
+    with p.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+# ================== ENV / CONFIG ==================
+load_dotenv()
+TOKEN = os.getenv("DISCORD_TOKEN")
+if not TOKEN:
+    raise SystemExit("Missing DISCORD_TOKEN in .env")
+
+DEV_GUILD_ID: int = int(os.getenv("DEV_GUILD_ID", "0"))
+
+# Track one hydrate reminder per user per guild
+USER_HYDRATE_TASKS: dict[tuple[int, int], asyncio.Task] = {}  # key = (guild_id, user_id)
+OWNER_ENV = os.getenv("OWNER_ID", "").strip()
+OWNER_IDS = {int(x) for x in os.getenv("OWNER_IDS", "").split(",") if x.strip().isdigit()}
+OWNER_ID = int(OWNER_ENV) if OWNER_ENV.isdigit() else 0
+OWNER_IDS = (OWNER_IDS | ({OWNER_ID} if OWNER_ID else set()))
+VERSION = "4.0.0 - NEW FEATURES!"  # tweak as you ship updates
+START_TIME = time.time()
+
+#-------- More Helpers ----------
+LOGO_URL = os.getenv("PANEL_LOGO_URL", "https://media.discordapp.net/attachments/1082621601620701245/1412577104050130985/chibistyle_SB.png?ex=68b8cc72&is=68b77af2&hm=ec5275674605b894a28539c86c8eb71a7ef467700b038a03795027edbbc741f0&=&format=webp&quality=lossless&width=922&height=922")      # small square logo
+BANNER_URL = os.getenv("PANEL_BANNER_URL", "https://media.discordapp.net/attachments/1082621601620701245/1412577103198814249/Stoner_Buddys.png?ex=68b8cc71&is=68b77af1&hm=6b3d24a9c50ccfc9d7334301392cb408857ad5c3d0a12e396b2fbe65259ef5d9&=&format=webp&quality=lossless&width=1382&height=922")  # optional wide banner; leave blank to skip
+
+#=========== Bot About me =========
+
+INVITE_URL  = os.getenv("ABOUT_INVITE_URL",  "Coming Soon!")  # Bot invite link
+SUPPORT_URL = os.getenv("ABOUT_SUPPORT_URL", "Coming Soon!")  # Support/Community server
+DOCS_URL    = os.getenv("ABOUT_DOCS_URL",    "Coming Soon!")  # Readme/Docs page
+
+
+
+# ================== STORAGE PATHS ==================
+DATA_DIR = Path(__file__).parent
+WISDOMS_PATH = DATA_DIR / "wisdoms.json"
+
+LOG_PATH = Path(__file__).parent / "command_log.jsonl"
+
+from datetime import datetime, timezone, timedelta  # keep this import
+
+LOG_DIR = Path(__file__).parent / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+LOG_RETENTION_DAYS = 14  # keep the last 14 days of logs
+
+def _log_path_for(dt: datetime) -> Path:
+    return LOG_DIR / f"command_log-{dt.strftime('%Y-%m-%d')}.jsonl"
+
+def _prune_old_logs():
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=LOG_RETENTION_DAYS)
+        for p in LOG_DIR.glob("command_log-*.jsonl"):
+            # parse the date from filename
+            try:
+                s = p.stem.split("command_log-")[1]  # YYYY-MM-DD
+                d = datetime.strptime(s, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            except Exception:
+                continue
+            if d < cutoff:
+                p.unlink(missing_ok=True)
+    except Exception as e:
+        print("[log] prune error:", e)
+
+def log_command_event(*, interaction: discord.Interaction, command_name: str, ok: bool, error: str | None = None):
+    user = interaction.user
+    guild = interaction.guild
+    channel = interaction.channel
+
+    rec = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "command": command_name,
+        "ok": ok,
+        "error": error,
+        "user": {
+            "id": getattr(user, "id", None),
+            "name": str(user) if user else None,
+        },
+        "guild": {
+            "id": getattr(guild, "id", None) if guild else None,
+            "name": getattr(guild, "name", None) if guild else None,
+        },
+        "channel": {
+            "id": getattr(channel, "id", None) if channel else None,
+            "name": getattr(channel, "name", None) if hasattr(channel, "name") else None,
+            "type": channel.type.name if hasattr(channel, "type") and channel else None,
+        },
+    }
+
+    try:
+        path = _log_path_for(datetime.now(timezone.utc))
+        with path.open("a", encoding="utf-8") as f:
+            json.dump(rec, f, ensure_ascii=False); f.write("\n")
+        _prune_old_logs()
+    except Exception as e:
+        print("[log] write error:", e)
+
+
+# ================== DISCORD CLIENT ==================
+# Slash commands don't require message_content intent
+intents = discord.Intents.default()
+bot = discord.Client(intents=intents)
+tree = app_commands.CommandTree(bot)
+
+async def _appcmd_on_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    if isinstance(error, _AC_CheckFailure):
+        try:
+            return await interaction.response.send_message("🚫 Not allowed.", ephemeral=True)
+        except discord.InteractionResponded:
+            try:
+                return await interaction.followup.send("🚫 Not allowed.", ephemeral=True)
+            except Exception:
+                return
+    try:
+        name = interaction.command.name if interaction.command else "unknown"
+    except Exception:
+        name = "unknown"
+    log_command_event(interaction=interaction, command_name=name, ok=False, error=str(error))
+
+tree.on_error = _appcmd_on_error
+
+# ---- Owner-only decorator using app_commands.check ----
+from discord import app_commands as _ac
+from discord.app_commands import CheckFailure as _AC_CheckFailure
+
+def owner_only():
+    async def predicate(interaction: discord.Interaction) -> bool:
+        try:
+            return interaction.user and (interaction.user.id in OWNER_IDS)
+        except Exception:
+            return False
+    return _ac.check(predicate)
+
+
+@bot.event
+async def on_app_command_completion(interaction: discord.Interaction, command: app_commands.Command):
+    log_command_event(interaction=interaction, command_name=command.name, ok=True)
+
+
+@tree.command(name="logs_latest", description="Owner-only: show the last log entries (optional date YYYY-MM-DD)")
+@app_commands.describe(limit="How many entries (default=5)", date="Date like 2025-09-02 (default=today)")
+@owner_only()
+async def logs_latest_cmd(interaction: discord.Interaction, limit: int = 5, date: str | None = None):
+    if interaction.user.id != OWNER_ID:
+        await interaction.response.send_message("🚫 Not allowed.", ephemeral=True)
+        return
+
+    # choose which file to read
+    if date:
+        try:
+            dt = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError:
+            await interaction.response.send_message("⚠️ Use date format YYYY-MM-DD.", ephemeral=True)
+            return
+    else:
+        dt = datetime.now(timezone.utc)
+
+    path = _log_path_for(dt)
+    if not path.exists():
+        await interaction.response.send_message("No logs for that date.", ephemeral=True)
+        return
+
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            lines = f.readlines()[-limit:]
+    except Exception as e:
+        await interaction.response.send_message(f"⚠️ Failed to read logs: {e}", ephemeral=True)
+        return
+
+    if not lines:
+        await interaction.response.send_message("No logs found.", ephemeral=True)
+        return
+
+    out = []
+    for line in lines:
+        try:
+            rec = json.loads(line)
+            ok = "✅" if rec.get("ok") else "❌"
+            user = (rec.get("user") or {}).get("name")
+            cmd = rec.get("command")
+            ts = rec.get("ts")
+            out.append(f"{ok} `{cmd}` by {user} at {ts}")
+        except Exception:
+            continue
+
+    msg = "\n".join(out) if out else "Couldn’t parse log entries."
+    await interaction.response.send_message(msg[:1900], ephemeral=True)  # keep under Discord limit
+
+#======= Bot About Me Embed======
+
+def about_embed(owner_id: int) -> discord.Embed:
+    uptime = _fmt_duration(time.time() - START_TIME)
+    cmds_today = _count_today_commands()
+
+    e = discord.Embed(
+        title="🌿 What is the Sotner Buddy? 🌿",
+        description=(
+            "Your comfy, high-vibe server companion:\n"
+            "• Wisdoms, quotes, lucky numbers\n"
+            "• Munchies & **Find Stoner Food** (+ reroll)\n"
+            "• Strain & movie picks by vibe\n"
+            "• **Blinker** timer + **Hydrate** reminders\n"
+            "• Music (play/queue/skip/now)\n"
+        ),
+        color=PANEL_COLOR
+    )
+    if LOGO_URL:
+        e.set_thumbnail(url=LOGO_URL)
+    if BANNER_URL:
+        e.set_image(url=BANNER_URL)
+
+    e.add_field(
+        name="Quick Tips",
+        value="Open **/panel** for buttons & dropdowns. Most responses are **ephemeral** so you won’t spam the channel.",
+        inline=False
+    )
+    e.add_field(
+        name="Stats",
+        value=f"Version: **v{VERSION}**\nUptime: **{uptime}**\nCommands today: **{cmds_today}**",
+        inline=True
+    )
+    e.add_field(
+        name="Owner",
+        value=f"<@{owner_id}>",
+        inline=True
+    )
+    e.set_footer(text="Stoner Buddy • Good vibes only")
+    return e
+
+class AboutLinks(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=60)
+        # Add buttons only if URLs exist
+        if INVITE_URL:
+            self.add_item(discord.ui.Button(label="Invite Bot", url=INVITE_URL, style=discord.ButtonStyle.link))
+        if SUPPORT_URL:
+            self.add_item(discord.ui.Button(label="Support Server", url=SUPPORT_URL, style=discord.ButtonStyle.link))
+        if DOCS_URL:
+            self.add_item(discord.ui.Button(label="Docs / Readme", url=DOCS_URL, style=discord.ButtonStyle.link))
+
+
+
+# ================== THEME ==================
+PANEL_COLOR = 0x58D68D   # minty green
+ACCENT_COLOR = 0x7ADF7A
+
+def hero_panel_embed() -> discord.Embed:
+    e = discord.Embed(
+        title="🌿 Stoner Buddy Control Panel 🌿",
+        description="Tap a button or pick a vibe.\nStay lifted, stay hydrated, and be nice to your lungs. ✌️",
+        color=PANEL_COLOR
+    )
+    # Small logo (top-right)
+    if LOGO_URL:
+        e.set_thumbnail(url=LOGO_URL)
+    # Optional banner (below description)
+    if BANNER_URL:
+        e.set_image(url=BANNER_URL)
+    e.set_footer(text="Stoner Buddy • Good vibes only")
+    return e
+
+# ================== PERSISTENT WISDOMS ==================
+DEFAULT_WISDOMS = [
     "If you drop your joint, it’s just the earth taking its hit.",
     "Time is an illusion, but Doritos are forever.",
     "Don’t chase the high, let the high chase you.",
     "Every snack is a meal if you believe in yourself.",
-    "The blunt chooses the smoker, not the other way around."
+    "The blunt chooses the smoker, not the other way around.",
 ]
 
-# Some random munchie suggestions
-munchies = [
+def load_wisdoms() -> list[str]:
+    if WISDOMS_PATH.exists():
+        try:
+            with WISDOMS_PATH.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list) and all(isinstance(x, str) for x in data):
+                    return data
+        except Exception as e:
+            print("Failed to read wisdoms.json, using defaults. Error:", e)
+    save_wisdoms(DEFAULT_WISDOMS)
+    return DEFAULT_WISDOMS.copy()
+
+def save_wisdoms(items: list[str]) -> None:
+    try:
+        with WISDOMS_PATH.open("w", encoding="utf-8") as f:
+            json.dump(items, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print("Failed to save wisdoms.json:", e)
+
+WISDOMS = load_wisdoms()
+
+# ================== OTHER DATA ==================
+MUNCHIES = [
     "pizza rolls",
     "a whole box of cereal",
     "chocolate chip cookies",
     "nachos with way too much cheese",
-    "ice cream straight from the tub"
+    "ice cream straight from the tub",
+    "ramen upgraded with egg + chili oil",
+    "quesadilla with hot chips inside (Takis/Flamin’ Hot)",
+    "apple slices with peanut butter, honey, and cinnamon",
+    "microwave s’mores (graham + chocolate + marshmallow)",
+    "frozen grapes (nature’s popsicles)",
+    "popcorn with hot sauce or ranch powder",
+    "bagel bites (air fryer for max crisp)",
+    "PB&J on a toasted tortilla roll-up",
+    "cereal on top of ice cream (Fruity Pebbles/Cinnamon Toast Crunch)",
+    "nachos: chips + cheese + jalapeño + salsa",
+    "tater tots loaded with cheese + scallions",
+    "grilled cheese with tomato soup dip",
+    "waffles with Nutella and banana slices",
+    "trail mix with extra M&Ms (don’t @ me)",
+    "mozzarella sticks with marinara",
+    "pigs in a blanket (mini crescent dogs)",
+    "cheesy garlic bread (but like… extra cheesy)",
+    "chips + guac + pico",
+    "cup noodles with a spoon of peanut butter (satay vibe)",
+    "loaded fries (cheese, bacon bits, green onion)",
+    "ice cream sandwich between two warm cookies",
+    "banana + Nutella + crushed pretzels",
+    "hummus with warm pita and cucumber",
+    "pizza rolls (obviously)",
+    "taquitos (air fryer wins again)",
+    "cheese & cracker stackers (DIY Lunchable energy)",
+    "peanut butter banana sandwich, toasted",
+    "Oreos dunked in cold milk",
+    "Cheetos dust on mac & cheese",
+    "queso dip with anything vaguely scoop-shaped",
+    "cinnamon sugar toast with butter",
+    "Cap’n Crunch mixed into yogurt (chaos parfait)",
+    "spinach artichoke dip + chips",
+    "churros (store-bought, oven-warmed)",
+    "dino nuggets with multiple dipping sauces",
+    "brownie mug cake (90-second microwave)",
 ]
 
-# Random greetings
-greetings = [
+GREETINGS = [
     "Yo, buddy!",
     "What’s up, legend?",
     "Hey hey, space traveler!",
-    "Namaste, munchie master!"
+    "Namaste, munchie master!",
 ]
 
-# The program in action
-name = input("First off, what should I call you? ")
+QUOTES = [
+    {"text": "When you smoke the herb, it reveals you to yourself.", "author": "Bob Marley", "source": "Goodreads"},
+    {"text": "Herb is the healing of a nation, alcohol is the destruction.", "author": "Bob Marley", "source": "Goodreads"},
+    {"text": "Why is marijuana against the law? It grows naturally upon our planet.", "author": "Bill Hicks", "source": "Goodreads"},
+    {"text": "Weed is from the earth. God put this here for me and you. Take advantage.", "author": "Smokey (Friday)", "source": "IMDb"},
+    {"text": "Yeah, I figure if I study high, take the test high, get high scores!", "author": "Jamal (How High)", "source": "IMDb"},
+    {"text": "Weed taught me patience… mostly because I forget what I was doing.", "author": "Unknown", "source": None},
+    {"text": "Some people meditate. I medicate.", "author": "Unknown", "source": None},
+    {"text": "You don’t chase the vibe—you invite it.", "author": "Stoner Buddy", "source": None},
+    {"text": "Inhale kindness, exhale hurry.", "author": "Unknown", "source": None},
+    {"text": "High is a place, snacks are the map.", "author": "Unknown", "source": None},
+    {"text": "Roll with it. Literally.", "author": "Unknown", "source": None},
+    {"text": "Cloudy mind? Open windows.", "author": "Unknown", "source": None},
+    {"text": "Be the chill you want to feel.", "author": "Unknown", "source": None},
+    {"text": "We’re all just stardust… with munchies.", "author": "Unknown", "source": None},
+    {"text": "A good sesh is just a meeting with your higher self.", "author": "Unknown", "source": None},
+    {"text": "Sip water like it’s sacred. Because it is.", "author": "Unknown", "source": None},
+    {"text": "If the vibes aren’t right, you’re just early.", "author": "Unknown", "source": None},
+    {"text": "Light the problem from a different angle.", "author": "Unknown", "source": None},
+    {"text": "One day at a time, one puff at a time.", "author": "Unknown", "source": None},
+    {"text": "Snack now, questions later.", "author": "Unknown", "source": None},
+    {"text": "Your future self says: hydrate.", "author": "Unknown", "source": None},
+    {"text": "The universe is big; your to-do list is not.", "author": "Unknown", "source": None},
+    {"text": "Weed doesn’t make time slow—your thoughts finally do.", "author": "Unknown", "source": None},
+    {"text": "Respect the sesh; respect the rest.", "author": "Unknown", "source": None},
+    {"text": "Good friends, good greens, good grief that’s nice.", "author": "Unknown", "source": None},
+    {"text": "If it sparks joy, keep a lighter.", "author": "Unknown", "source": None},
+    {"text": "Take the scenic route through your own head.", "author": "Unknown", "source": None},
+    {"text": "Vibes are contagious. Choose wisely.", "author": "Unknown", "source": None},
+    {"text": "Breathe in patience. Breathe out pressure.", "author": "Unknown", "source": None},
+    {"text": "Kindness hits harder than any strain.", "author": "Unknown", "source": None},
+    {"text": "When in doubt, step outside and look up.", "author": "Unknown", "source": None},
+    {"text": "Couch lock is just gravity giving you a hug.", "author": "Unknown", "source": None},
+    {"text": "Silence isn’t empty; it’s pre-rolled with ideas.", "author": "Unknown", "source": None},
+    {"text": "The best plan is sometimes no plan—plus snacks.", "author": "Unknown", "source": None},
+    {"text": "Trust the process. And the playlist.", "author": "Unknown", "source": None},
+]
 
-print("\n" + random.choice(greetings), name + " 👋")
-print("Here’s your wisdom for today:")
-print("✨", random.choice(wisdoms))
-print("\nAlso... maybe grab some", random.choice(munchies), "😋")
+def embed_quote() -> discord.Embed:
+    q = random.choice(QUOTES)
+    e = discord.Embed(
+        title="💬 Stoner Quote",
+        description=f"“{q['text']}”",
+        color=0x89C07A
+    )
+    footer = q["author"]
+    if q.get("source"):
+        footer += f" • {q['source']}"
+    e.set_footer(text=footer)
+    return e
+
+def embed_wisdom() -> discord.Embed:
+    e = discord.Embed(
+        title="🌌 Stoner Wisdom",
+        description=f"✨ {random.choice(WISDOMS)}",
+        color=ACCENT_COLOR
+    )
+    e.set_footer(text="Stoner Buddy • Stay lifted")
+    return e
+
+def embed_munchie() -> discord.Embed:
+    item = random.choice(MUNCHIES)
+    e = discord.Embed(
+        title="🍕 Munchie Suggestion",
+        description=f"😋 Consider grabbing **{item}**",
+        color=0xFFB86C
+    )
+    e.set_footer(text="Stoner Buddy • Munch responsibly")
+    return e
+
+def embed_greet(user: discord.abc.User) -> discord.Embed:
+    e = discord.Embed(
+        title="✌️ Greetings",
+        description=f"👋 {random.choice(GREETINGS)} {user.mention}!",
+        color=0x55CCDD
+    )
+    e.set_footer(text="Stoner Buddy • Good vibes only")
+    return e
+
+def embed_lucky() -> discord.Embed:
+    num = random.randint(1, 100)
+    e = discord.Embed(
+        title="🔮 Lucky Number",
+        description=f"Your lucky number is **{num}**",
+        color=0xB48EF7
+    )
+    e.set_footer(text="Stoner Buddy • Cosmic rolls")
+    return e
+
+# ================== STRAINS BY VIBE  ==================
+STRAINS_BY_VIBE = {
+    "Chill": [
+        {"name": "Granddaddy Purple", "type": "Indica", "desc": "Heavy body, dreamy headspace."},
+        {"name": "Northern Lights",    "type": "Indica", "desc": "Timeless couch-cloud serenity."},
+        {"name": "Purple Kush",        "type": "Indica", "desc": "Deep relaxation and night-mode vibes."},
+        {"name": "Bubba Kush",         "type": "Indica", "desc": "Warm blanket for the brain—slow it down."},
+        {"name": "Afghan Kush",        "type": "Indica", "desc": "Old-school calm with earthy notes."},
+        {"name": "Skywalker OG",       "type": "Indica-leaning", "desc": "Use the force… to find the couch."},
+        {"name": "Blueberry",          "type": "Indica-leaning", "desc": "Sweet berry chill, mellow and cozy."},
+        {"name": "LA Confidential",    "type": "Indica", "desc": "Smooth, hush-hush sedation."},
+        {"name": "Hindu Kush",         "type": "Indica", "desc": "Classic mountain calm; pure indica lineage."},
+        {"name": "Grape Ape",          "type": "Indica", "desc": "Purple vibes and plush relaxation."},
+    ],
+    "Uplift": [
+        {"name": "Sour Diesel",        "type": "Sativa-leaning", "desc": "Energetic, chatty, and bright."},
+        {"name": "Green Crack",        "type": "Sativa", "desc": "Focus + pep (name’s wild, vibe is zippy)."},
+        {"name": "Jack Herer",         "type": "Sativa-leaning", "desc": "Creative clarity with a classic spark."},
+        {"name": "Durban Poison",      "type": "Sativa", "desc": "Clean, buzzy focus—daytime favorite."},
+        {"name": "Super Lemon Haze",   "type": "Sativa", "desc": "Citrus pop + sunny uplift."},
+        {"name": "Strawberry Cough",   "type": "Sativa-leaning", "desc": "Sweet, social, giggly energy."},
+        {"name": "Maui Wowie",         "type": "Sativa", "desc": "Beach-brain optimism and aloha vibes."},
+        {"name": "Chocolope",          "type": "Sativa", "desc": "Cocoa-kissed, upbeat motivation."},
+        {"name": "Pineapple Express",  "type": "Sativa-leaning", "desc": "Juicy momentum—movie-fueled legend."},
+        {"name": "Amnesia Haze",       "type": "Sativa", "desc": "Euphoric lift with classic haze sparkle."},
+    ],
+    "Classic": [
+        {"name": "White Widow",        "type": "Balanced Hybrid", "desc": "Award-winning legend; balanced buzz."},
+        {"name": "Skunk #1",           "type": "Hybrid", "desc": "Breeding cornerstone—timeless profile."},
+        {"name": "OG Kush",            "type": "Hybrid", "desc": "The West Coast icon; pungent + potent."},
+        {"name": "AK-47",              "type": "Hybrid", "desc": "Surprisingly mellow, long-lasting calm."},
+        {"name": "Blue Dream",         "type": "Sativa-leaning", "desc": "Famous daytime clarity + sweetness."},
+        {"name": "GSC (Girl Scout Cookies)", "type": "Hybrid", "desc": "Dessert vibes; euphoric cruise."},
+        {"name": "Trainwreck",         "type": "Sativa-leaning", "desc": "Fast onset; creative storm then calm."},
+        {"name": "Chemdawg",           "type": "Hybrid", "desc": "Diesel funk; parent to many modern stars."},
+        {"name": "Acapulco Gold",      "type": "Sativa-dominant", "desc": "Golden oldie; spicy, uplifting legend."},
+        {"name": "GG4 (Gorilla Glue #4)", "type": "Hybrid", "desc": "Sticky legend; heavy-hitting relaxation."},
+    ],
+}
+
+def embed_strain_from(name: str, s_type: str, desc: str) -> discord.Embed:
+    return discord.Embed(
+        title=f"🌿 {name}",
+        description=f"**Type:** {s_type}\n{desc}",
+        color=ACCENT_COLOR
+    )
+
+# ================== MOVIES BY VIBE ==================
+MOVIES_BY_VIBE = {
+    "Chill": [
+        {"title": "The Big Lebowski", "year": 1998, "blurb": "Bowling, rugs, and supreme chill."},
+        {"title": "Lost in Translation", "year": 2003, "blurb": "Soft vibes, neon nights, gentle feels."},
+        {"title": "The Grand Budapest Hotel", "year": 2014, "blurb": "Pastel chaos with perfect symmetry."},
+        {"title": "Chef", "year": 2014, "blurb": "Food truck therapy and good tunes."},
+        {"title": "My Neighbor Totoro", "year": 1988, "blurb": "Forest spirits + cozy comfort."},
+        {"title": "Big Time Adolescence", "year": 2019, "blurb": "Hanging out, messing up, growing up."},
+        {"title": "Hunt for the Wilderpeople", "year": 2016, "blurb": "Wholesome chaos in the bush."},
+        {"title": "Palm Springs", "year": 2020, "blurb": "Time-loop with breezy humor."},
+        {"title": "Before Sunrise", "year": 1995, "blurb": "Walk, talk, vibe."},
+        {"title": "The Secret Life of Walter Mitty", "year": 2013, "blurb": "Quiet inspo + dreamy visuals."},
+    ],
+    "Comedy": [
+        {"title": "Pineapple Express", "year": 2008, "blurb": "Buddy chaos with a smoky core."},
+        {"title": "Friday", "year": 1995, "blurb": "One day, a whole mood."},
+        {"title": "Harold & Kumar Go to White Castle", "year": 2004, "blurb": "Quest for sliders, destiny, and laughs."},
+        {"title": "How High", "year": 2001, "blurb": "Academics, but make it herbal."},
+        {"title": "Half Baked", "year": 1998, "blurb": "High-jinks and snack-fueled schemes."},
+        {"title": "Mac & Devin Go to High School", "year": 2012, "blurb": "Class dismissed, vibes in session."},
+        {"title": "Superbad", "year": 2007, "blurb": "Awkward legends in the making."},
+        {"title": "Hot Fuzz", "year": 2007, "blurb": "Action parody perfection."},
+        {"title": "Step Brothers", "year": 2008, "blurb": "Catalina Wine Mixer energy."},
+        {"title": "21 Jump Street", "year": 2012, "blurb": "Undercover and unprepared."},
+    ],
+    "Trippy": [
+        {"title": "Fear and Loathing in Las Vegas", "year": 1998, "blurb": "Surreal road trip through neon desert."},
+        {"title": "Enter the Void", "year": 2009, "blurb": "Psychedelic, first-person odyssey."},
+        {"title": "2001: A Space Odyssey", "year": 1968, "blurb": "Monoliths, star babies, cosmic awe."},
+        {"title": "Mandy", "year": 2018, "blurb": "Chainsaws, synths, saturated madness."},
+        {"title": "Doctor Strange", "year": 2016, "blurb": "City-bending mystic fractals."},
+        {"title": "Annihilation", "year": 2018, "blurb": "Shimmering weird biology."},
+        {"title": "Beyond the Black Rainbow", "year": 2010, "blurb": "Retro sci-fi haze."},
+        {"title": "The Fall", "year": 2006, "blurb": "Storybook visuals, dream logic."},
+        {"title": "A Scanner Darkly", "year": 2006, "blurb": "Rotoscoped paranoia cloud."},
+        {"title": "Everything Everywhere All at Once", "year": 2022, "blurb": "Multiverse with hot-dog hands."},
+    ],
+    "Classics": [
+        {"title": "Dazed and Confused", "year": 1993, "blurb": "Last day of school chill."},
+        {"title": "Cheech & Chong’s Up in Smoke", "year": 1978, "blurb": "The OG stoner road trip."},
+        {"title": "Clerks", "year": 1994, "blurb": "I’m not even supposed to be here today."},
+        {"title": "Trainspotting", "year": 1996, "blurb": "Kinetic, stylish, iconic (heavy at times)."},
+        {"title": "The Matrix", "year": 1999, "blurb": "What if the spoon wasn’t real?"},
+        {"title": "Pulp Fiction", "year": 1994, "blurb": "Non-linear cool with a Royale."},
+        {"title": "Fight Club", "year": 1999, "blurb": "Rules, soap, alter-egos."},
+        {"title": "American Psycho", "year": 2000, "blurb": "Satire with a killer playlist."},
+        {"title": "Snatch", "year": 2000, "blurb": "Diamond caper, quick cuts."},
+        {"title": "The Truman Show", "year": 1998, "blurb": "What if the set was your life?"},
+    ],
+    "Animated": [
+        {"title": "Spider-Man: Into the Spider-Verse", "year": 2018, "blurb": "Kinetic comic art explosion."},
+        {"title": "Spirited Away", "year": 2001, "blurb": "Bathhouse spirits and brave hearts."},
+        {"title": "Fantastic Planet", "year": 1973, "blurb": "Alien allegory in surreal pastels."},
+        {"title": "Akira", "year": 1988, "blurb": "Neo-Tokyo energy overload."},
+        {"title": "The Mitchells vs. the Machines", "year": 2021, "blurb": "Family chaos + glitchy fun."},
+        {"title": "Waking Life", "year": 2001, "blurb": "Dreams discussing dreams."},
+        {"title": "Wallace & Gromit: The Wrong Trousers", "year": 1993, "blurb": "Stop-motion heist charm."},
+        {"title": "Klaus", "year": 2019, "blurb": "2D magic with warmth."},
+        {"title": "Persepolis", "year": 2007, "blurb": "Bold b&w memoir with heart."},
+        {"title": "Isle of Dogs", "year": 2018, "blurb": "Miniature sets, massive style."},
+    ],
+}
+
+HYDRATES = [
+    "💧 Take a sip, champ!",
+    "Stay hydrated, stay elevated 🌿",
+    "Water is the original energy drink.",
+    "Good buds need good hydration.",
+    "Hydrate or evaporate, my dude.",
+]
+
+#========== WYR ==========
+
+# --- Would You Rather data ---
+WYR_OPTIONS: list[tuple[str, str]] = [
+    ("infinite rolling papers but mid-tier flower", "top-shelf flower but always one paper short"),
+    ("never get munchies again", "munchies always, but zero guilt, zero calories"),
+    ("hotbox a limo with Snoop", "campfire sesh with Willie"),
+    ("perfect edibles every time", "perfect joints every time"),
+    ("always find a lighter when you need it", "never lose your grinder again"),
+    ("watch Pineapple Express on loop", "watch The Big Lebowski on loop"),
+    ("smoke on a beach at sunset", "smoke on a mountain at sunrise"),
+    ("taste buds boosted x2", "tolerance cut in half"),
+    ("OG Kush forever", "a new strain every day"),
+    ("free delivery fees forever", "dispensary VIP discounts forever"),
+    ("only giggly highs", "only creative highs"),
+    ("always have the perfect playlist", "always have the perfect snacks"),
+    ("gravity bong mastery", "dab rig mastery"),
+    ("never cough again", "always get glass-clear hits"),
+    ("can talk to pets when high", "can understand plants when high"),
+    ("perfectly conceal smell", "perfectly mask red eyes"),
+    ("movie nights only", "game nights only"),
+    ("infused desserts only", "savory edibles only"),
+    ("pre-ground stash always fresh", "hand-grind ritual always perfect"),
+    ("local munchie spot never closes", "favorite delivery always 10 minutes away"),
+]
+
+class WYRView(discord.ui.View):
+    def __init__(self, left: str, right: str, timeout: float = 120):
+        super().__init__(timeout=timeout)
+        self.left = left
+        self.right = right
+        self.a_votes = 0
+        self.b_votes = 0
+        self.voted: set[int] = set()
+
+        btn_a = discord.ui.Button(label=f"🅰️ {left}", style=discord.ButtonStyle.primary, custom_id="wyr_a")
+        btn_b = discord.ui.Button(label=f"🅱️ {right}", style=discord.ButtonStyle.secondary, custom_id="wyr_b")
+
+        async def _vote(i: discord.Interaction, which: str):
+            try:
+                if i.user.id in self.voted:
+                    await i.response.send_message("You already voted on this one 💨", ephemeral=True)
+                    return
+                self.voted.add(i.user.id)
+                if which == "a":
+                    self.a_votes += 1
+                else:
+                    self.b_votes += 1
+
+                emb = i.message.embeds[0] if i.message and i.message.embeds else None
+                if emb:
+                    emb.set_footer(text=f"Votes — A: {self.a_votes} • B: {self.b_votes}")
+                await i.response.edit_message(embed=emb, view=self)
+            except discord.InteractionResponded:
+                # Fallback in the rare case we already responded
+                await i.followup.edit_message(i.message.id, embed=emb, view=self)
+            except Exception as e:
+                try:
+                    await i.response.send_message(f"Oops: {e}", ephemeral=True)
+                except discord.InteractionResponded:
+                    await i.followup.send(f"Oops: {e}", ephemeral=True)
+
+        async def _vote_a(i: discord.Interaction): await _vote(i, "a")
+        async def _vote_b(i: discord.Interaction): await _vote(i, "b")
+
+        btn_a.callback = _vote_a
+        btn_b.callback = _vote_b
+        self.add_item(btn_a); self.add_item(btn_b)
+
+@tree.command(name="wyr", description="Would You Rather — stoner edition (vote with buttons)")
+async def wyr_cmd(interaction: discord.Interaction):
+    left, right = random.choice(WYR_OPTIONS)
+    e = discord.Embed(
+        title="🤔 Would You Rather",
+        description=f"**A)** {left}\n**B)** {right}\n\nVote below!",
+        color=0x9B59B6
+    )
+    if LOGO_URL: e.set_thumbnail(url=LOGO_URL)
+
+    view = WYRView(left, right, timeout=120)
+    await interaction.response.send_message(embed=e, view=view)  # public so friends can vote
+    msg = await interaction.original_response()
+
+    async def _finalize():
+        await asyncio.sleep(view.timeout or 120)
+        for item in view.children:
+            if isinstance(item, discord.ui.Button):
+                item.disabled = True
+        e.set_footer(text=f"Final — A: {view.a_votes} • B: {view.b_votes}")
+        try:
+            await msg.edit(embed=e, view=view)
+        except Exception:
+            pass
+    asyncio.create_task(_finalize())
+
+
+
+
+
+# ===== Roll the Joint outcomes =====
+JOINT_OUTCOMES = [
+    ("🌲✨ Perfect pearl", "Smooth draw, even burn. Absolute chef’s kiss."),
+    ("🚤🔥 Canoe city", "It’s burning down one side. Lick + rotate rescue mission."),
+    ("🧻😅 Loose log", "Still smokes. Confidence > craftsmanship."),
+    ("🦫🧵 Beavers & veins", "Lumpy but lovable—you tried, king/queen."),
+    ("💎🌪️ Diamond duster", "Tight, sparkly, almost too pretty to light."),
+    ("🎯👌 Dart level-100", "Snaps like a pro. Filters fear you."),
+    ("💥📄 Paper tear", "Disaster! Patch job with a spare gum strip."),
+    ("🌀🌫️ Whirlwind", "Pulls but spins—probably over-stuffed."),
+    ("🪄⭐ Wizard wand", "Long, lean, and surprisingly efficient."),
+    ("🧯🚫 Extinguished", "It keeps going out—probably rolled too tight."),
+    ("🍇💜 Grape ape cone", "Aromatic unit. The sesh smells like victory."),
+    ("🧪✨ Scientist special", "Filter length, ratio, airflow—flawless lab work."),
+]
+
+JOINT_TIPS = [
+    "Tip: Pack the tip gently; tight at the end, looser at the top.",
+    "Tip: Small spiral tuck beats brute force every time.",
+    "Tip: If it canoes, rotate the canoe up and slow your draw.",
+    "Tip: A tiny tamp after first light evens the cherry.",
+    "Tip: Criss-cross grind helps prevent hot spots.",
+]
+
+# ===== Roll Joint view =====
+class RollJointView(discord.ui.View):
+    def __init__(self, timeout: float = 180):
+        super().__init__(timeout=timeout)
+        btn = discord.ui.Button(label="Roll it! 🎲", style=discord.ButtonStyle.success, custom_id="roll_joint_go")
+
+        async def _roll(i: discord.Interaction):
+            outcome, desc = random.choice(JOINT_OUTCOMES)
+            tip = random.choice(JOINT_TIPS) if random.random() < 0.7 else ""
+            e = discord.Embed(title=f"{outcome}", description=f"{desc}\n\n{tip}", color=0x7FDBB6)
+            await i.response.send_message(embed=e, ephemeral=True)
+
+        btn.callback = _roll
+        self.add_item(btn)
+
+
+# ===== Stoner Food (local, no API) =====
+FOOD_BY_CATEGORY = {
+    "Sweet": [
+        "churros with chocolate dip",
+        "brownie mug cake (90 sec)",
+        "ice cream + Fruity Pebbles",
+        "banana + Nutella + pretzels",
+        "cinnamon sugar toast with butter",
+        "waffles with peanut butter + honey",
+        "s’mores in the microwave",
+        "strawberries dipped in Nutella",
+        "apple slices + peanut butter + cinnamon",
+        "yogurt parfait with Cap’n Crunch",
+    ],
+    "Salty": [
+        "loaded nachos (chips + cheese + jalapeño + salsa)",
+        "tater tots with melted cheese",
+        "quesadilla stuffed with hot chips",
+        "popcorn with hot sauce",
+        "taquitos (air fryer magic)",
+        "dino nuggets + multiple dips",
+        "pretzels with cheese dip",
+        "garlic bread (extra cheesy)",
+        "mozzarella sticks + marinara",
+        "chips + guac + pico",
+    ],
+    "Quick": [
+        "ramen with egg + chili oil",
+        "PB&J tortilla roll-up (toasted)",
+        "bagel bites",
+        "pizza rolls (obviously)",
+        "cup noodles + spoon of peanut butter (satay vibes)",
+        "microwave mac & cheese + Cheetos dust",
+        "grilled cheese + tomato soup dip",
+        "trail mix with extra M&Ms",
+        "frozen grapes (elite)",
+        "instant oatmeal + chocolate chips",
+    ],
+    "Gourmet": [
+        "smash burger sliders with pickles",
+        "quesabirria tacos (cheesy dip bliss)",
+        "Korean corn dogs (sugar + ketchup/mustard)",
+        "garlic butter shrimp over noodles",
+        "breakfast burrito (eggs, tots, salsa)",
+        "homemade nacho cheese (evap milk + cheese + spices)",
+        "cast-iron steak bites + garlic butter",
+        "carbonara (egg + parm + pasta water)",
+        "baked brie with honey + crackers",
+        "quesadilla al pastor (if leftovers exist)",
+    ],
+    "Breakfast": [
+        "pancakes with peanut butter + syrup",
+        "breakfast burrito (eggs, tots, cheese)",
+        "French toast sticks (frozen = win)",
+        "bagel + cream cheese + hot honey",
+        "breakfast quesadilla (eggs + salsa)",
+        "hash browns with cheese + scallions",
+        "overnight oats (if sober-you prepped)",
+        "breakfast sandwich (egg, cheese, sausage)",
+        "waffles + banana slices",
+        "cereal (no shame double bowl)",
+    ],
+    "Dessert": [
+        "cookie ice cream sandwich (warm the cookies!)",
+        "brownie à la mode",
+        "fried Oreos (pancake batter + fry)",
+        "milkshake (ice cream + milk + chaos)",
+        "cheesecake slices (store-bought hero)",
+        "rice krispie treats (microwave marshmallows)",
+        "banana split (classic)",
+        "pudding cup + crushed cookies",
+        "tiramisu (store-bought, still gas)",
+        "donut grilled on a pan (trust)",
+    ],
+    "Drinks": [
+        "iced lemonade + sprite (lazy Arnold Palmer-ish)",
+        "iced coffee with vanilla ice cream (float)",
+        "hot chocolate with marshmallows",
+        "seltzer + splash of juice",
+        "iced tea + mint",
+        "mango lassi (yogurt + mango + milk + sugar)",
+        "banana milkshake",
+        "chai latte (store mix is fine)",
+        "smoothie (frozen fruit + juice)",
+        "water. like, a lot of water 💧",
+    ],
+}
+
+# ===== Stoner Food (local, no API) =====
+FOOD_BY_CATEGORY = {
+    "Sweet": [
+        "churros with chocolate dip",
+        "brownie mug cake (90 sec)",
+        "ice cream + Fruity Pebbles",
+        "banana + Nutella + pretzels",
+        "cinnamon sugar toast with butter",
+        "waffles with peanut butter + honey",
+        "s’mores in the microwave",
+        "strawberries dipped in Nutella",
+        "apple slices + peanut butter + cinnamon",
+        "yogurt parfait with Cap’n Crunch",
+    ],
+    "Salty": [
+        "loaded nachos (chips + cheese + jalapeño + salsa)",
+        "tater tots with melted cheese",
+        "quesadilla stuffed with hot chips",
+        "popcorn with hot sauce",
+        "taquitos (air fryer magic)",
+        "dino nuggets + multiple dips",
+        "pretzels with cheese dip",
+        "garlic bread (extra cheesy)",
+        "mozzarella sticks + marinara",
+        "chips + guac + pico",
+    ],
+    "Quick": [
+        "ramen with egg + chili oil",
+        "PB&J tortilla roll-up (toasted)",
+        "bagel bites",
+        "pizza rolls (obviously)",
+        "cup noodles + spoon of peanut butter (satay vibes)",
+        "microwave mac & cheese + Cheetos dust",
+        "grilled cheese + tomato soup dip",
+        "trail mix with extra M&Ms",
+        "frozen grapes (elite)",
+        "instant oatmeal + chocolate chips",
+    ],
+    "Gourmet": [
+        "smash burger sliders with pickles",
+        "quesabirria tacos (cheesy dip bliss)",
+        "Korean corn dogs (sugar + ketchup/mustard)",
+        "garlic butter shrimp over noodles",
+        "breakfast burrito (eggs, tots, salsa)",
+        "homemade nacho cheese (evap milk + cheese + spices)",
+        "cast-iron steak bites + garlic butter",
+        "carbonara (egg + parm + pasta water)",
+        "baked brie with honey + crackers",
+        "quesadilla al pastor (if leftovers exist)",
+    ],
+    "Breakfast": [
+        "pancakes with peanut butter + syrup",
+        "breakfast burrito (eggs, tots, cheese)",
+        "French toast sticks (frozen = win)",
+        "bagel + cream cheese + hot honey",
+        "breakfast quesadilla (eggs + salsa)",
+        "hash browns with cheese + scallions",
+        "overnight oats (if sober-you prepped)",
+        "breakfast sandwich (egg, cheese, sausage)",
+        "waffles + banana slices",
+        "cereal (no shame double bowl)",
+    ],
+    "Dessert": [
+        "cookie ice cream sandwich (warm the cookies!)",
+        "brownie à la mode",
+        "fried Oreos (pancake batter + fry)",
+        "milkshake (ice cream + milk + chaos)",
+        "cheesecake slices (store-bought hero)",
+        "rice krispie treats (microwave marshmallows)",
+        "banana split (classic)",
+        "pudding cup + crushed cookies",
+        "tiramisu (store-bought, still gas)",
+        "donut grilled on a pan (trust)",
+    ],
+    "Drinks": [
+        "iced lemonade + sprite (lazy Arnold Palmer-ish)",
+        "iced coffee with vanilla ice cream (float)",
+        "hot chocolate with marshmallows",
+        "seltzer + splash of juice",
+        "iced tea + mint",
+        "mango lassi (yogurt + mango + milk + sugar)",
+        "banana milkshake",
+        "chai latte (store mix is fine)",
+        "smoothie (frozen fruit + juice)",
+        "water. like, a lot of water 💧",
+    ],
+}
+
+FOOD_BY_CATEGORY = {
+    "Sweet": [
+        "churros with chocolate dip",
+        "brownie mug cake (90 sec)",
+        "ice cream + Fruity Pebbles",
+        "banana + Nutella + pretzels",
+        "cinnamon sugar toast with butter",
+        "waffles with peanut butter + honey",
+        "s’mores in the microwave",
+        "strawberries dipped in Nutella",
+        "apple slices + peanut butter + cinnamon",
+        "yogurt parfait with Cap’n Crunch",
+    ],
+    "Salty": [
+        "loaded nachos (chips + cheese + jalapeño + salsa)",
+        "tater tots with melted cheese",
+        "quesadilla stuffed with hot chips",
+        "popcorn with hot sauce",
+        "taquitos (air fryer magic)",
+        "dino nuggets + multiple dips",
+        "pretzels with cheese dip",
+        "garlic bread (extra cheesy)",
+        "mozzarella sticks + marinara",
+        "chips + guac + pico",
+    ],
+    "Quick": [
+        "ramen with egg + chili oil",
+        "PB&J tortilla roll-up (toasted)",
+        "bagel bites",
+        "pizza rolls (obviously)",
+        "cup noodles + spoon of peanut butter (satay vibes)",
+        "microwave mac & cheese + Cheetos dust",
+        "grilled cheese + tomato soup dip",
+        "trail mix with extra M&Ms",
+        "frozen grapes (elite)",
+        "instant oatmeal + chocolate chips",
+    ],
+    "Gourmet": [
+        "smash burger sliders with pickles",
+        "quesabirria tacos (cheesy dip bliss)",
+        "Korean corn dogs (sugar + ketchup/mustard)",
+        "garlic butter shrimp over noodles",
+        "breakfast burrito (eggs, tots, salsa)",
+        "homemade nacho cheese (evap milk + cheese + spices)",
+        "cast-iron steak bites + garlic butter",
+        "carbonara (egg + parm + pasta water)",
+        "baked brie with honey + crackers",
+        "quesadilla al pastor (if leftovers exist)",
+    ],
+    "Breakfast": [
+        "pancakes with peanut butter + syrup",
+        "breakfast burrito (eggs, tots, cheese)",
+        "French toast sticks (frozen = win)",
+        "bagel + cream cheese + hot honey",
+        "breakfast quesadilla (eggs + salsa)",
+        "hash browns with cheese + scallions",
+        "overnight oats (if sober-you prepped)",
+        "breakfast sandwich (egg, cheese, sausage)",
+        "waffles + banana slices",
+        "cereal (no shame double bowl)",
+    ],
+    "Dessert": [
+        "cookie ice cream sandwich (warm the cookies!)",
+        "brownie à la mode",
+        "fried Oreos (pancake batter + fry)",
+        "milkshake (ice cream + milk + chaos)",
+        "cheesecake slices (store-bought hero)",
+        "rice krispie treats (microwave marshmallows)",
+        "banana split (classic)",
+        "pudding cup + crushed cookies",
+        "tiramisu (store-bought, still gas)",
+        "donut grilled on a pan (trust)",
+    ],
+    "Drinks": [
+        "iced lemonade + sprite (lazy Arnold Palmer-ish)",
+        "iced coffee with vanilla ice cream (float)",
+        "hot chocolate with marshmallows",
+        "seltzer + splash of juice",
+        "iced tea + mint",
+        "mango lassi (yogurt + mango + milk + sugar)",
+        "banana milkshake",
+        "chai latte (store mix is fine)",
+        "smoothie (frozen fruit + juice)",
+        "water. like, a lot of water 💧",
+    ],
+}
+
+# ===== Stoner Food (local, no API) =====
+FOOD_BY_CATEGORY = {
+    "Sweet": [
+        "churros with chocolate dip",
+        "brownie mug cake (90 sec)",
+        "ice cream + Fruity Pebbles",
+        "banana + Nutella + pretzels",
+        "cinnamon sugar toast with butter",
+        "waffles with peanut butter + honey",
+        "s’mores in the microwave",
+        "strawberries dipped in Nutella",
+        "apple slices + peanut butter + cinnamon",
+        "yogurt parfait with Cap’n Crunch",
+    ],
+    "Salty": [
+        "loaded nachos (chips + cheese + jalapeño + salsa)",
+        "tater tots with melted cheese",
+        "quesadilla stuffed with hot chips",
+        "popcorn with hot sauce",
+        "taquitos (air fryer magic)",
+        "dino nuggets + multiple dips",
+        "pretzels with cheese dip",
+        "garlic bread (extra cheesy)",
+        "mozzarella sticks + marinara",
+        "chips + guac + pico",
+    ],
+    "Quick": [
+        "ramen with egg + chili oil",
+        "PB&J tortilla roll-up (toasted)",
+        "bagel bites",
+        "pizza rolls (obviously)",
+        "cup noodles + spoon of peanut butter (satay vibes)",
+        "microwave mac & cheese + Cheetos dust",
+        "grilled cheese + tomato soup dip",
+        "trail mix with extra M&Ms",
+        "frozen grapes (elite)",
+        "instant oatmeal + chocolate chips",
+    ],
+    "Gourmet": [
+        "smash burger sliders with pickles",
+        "quesabirria tacos (cheesy dip bliss)",
+        "Korean corn dogs (sugar + ketchup/mustard)",
+        "garlic butter shrimp over noodles",
+        "breakfast burrito (eggs, tots, salsa)",
+        "homemade nacho cheese (evap milk + cheese + spices)",
+        "cast-iron steak bites + garlic butter",
+        "carbonara (egg + parm + pasta water)",
+        "baked brie with honey + crackers",
+        "quesadilla al pastor (if leftovers exist)",
+    ],
+    "Breakfast": [
+        "pancakes with peanut butter + syrup",
+        "breakfast burrito (eggs, tots, cheese)",
+        "French toast sticks (frozen = win)",
+        "bagel + cream cheese + hot honey",
+        "breakfast quesadilla (eggs + salsa)",
+        "hash browns with cheese + scallions",
+        "overnight oats (if sober-you prepped)",
+        "breakfast sandwich (egg, cheese, sausage)",
+        "waffles + banana slices",
+        "cereal (no shame double bowl)",
+    ],
+    "Dessert": [
+        "cookie ice cream sandwich (warm the cookies!)",
+        "brownie à la mode",
+        "fried Oreos (pancake batter + fry)",
+        "milkshake (ice cream + milk + chaos)",
+        "cheesecake slices (store-bought hero)",
+        "rice krispie treats (microwave marshmallows)",
+        "banana split (classic)",
+        "pudding cup + crushed cookies",
+        "tiramisu (store-bought, still gas)",
+        "donut grilled on a pan (trust)",
+    ],
+    "Drinks": [
+        "iced lemonade + sprite (lazy Arnold Palmer-ish)",
+        "iced coffee with vanilla ice cream (float)",
+        "hot chocolate with marshmallows",
+        "seltzer + splash of juice",
+        "iced tea + mint",
+        "mango lassi (yogurt + mango + milk + sugar)",
+        "banana milkshake",
+        "chai latte (store mix is fine)",
+        "smoothie (frozen fruit + juice)",
+        "water. like, a lot of water 💧",
+    ],
+}
+
+# ------ Food No AIP Yet -------------
+
+FOOD_BY_CATEGORY = {
+    "Sweet": [
+        "churros with chocolate dip",
+        "brownie mug cake (90 sec)",
+        "ice cream + Fruity Pebbles",
+        "banana + Nutella + pretzels",
+        "cinnamon sugar toast with butter",
+        "waffles with peanut butter + honey",
+        "s’mores in the microwave",
+        "strawberries dipped in Nutella",
+        "apple slices + peanut butter + cinnamon",
+        "yogurt parfait with Cap’n Crunch",
+    ],
+    "Salty": [
+        "loaded nachos (chips + cheese + jalapeño + salsa)",
+        "tater tots with melted cheese",
+        "quesadilla stuffed with hot chips",
+        "popcorn with hot sauce",
+        "taquitos (air fryer magic)",
+        "dino nuggets + multiple dips",
+        "pretzels with cheese dip",
+        "garlic bread (extra cheesy)",
+        "mozzarella sticks + marinara",
+        "chips + guac + pico",
+    ],
+    "Quick": [
+        "ramen with egg + chili oil",
+        "PB&J tortilla roll-up (toasted)",
+        "bagel bites",
+        "pizza rolls (obviously)",
+        "cup noodles + spoon of peanut butter (satay vibes)",
+        "microwave mac & cheese + Cheetos dust",
+        "grilled cheese + tomato soup dip",
+        "trail mix with extra M&Ms",
+        "frozen grapes (elite)",
+        "instant oatmeal + chocolate chips",
+    ],
+    "Gourmet": [
+        "smash burger sliders with pickles",
+        "quesabirria tacos (cheesy dip bliss)",
+        "Korean corn dogs (sugar + ketchup/mustard)",
+        "garlic butter shrimp over noodles",
+        "breakfast burrito (eggs, tots, salsa)",
+        "homemade nacho cheese (evap milk + cheese + spices)",
+        "cast-iron steak bites + garlic butter",
+        "carbonara (egg + parm + pasta water)",
+        "baked brie with honey + crackers",
+        "quesadilla al pastor (if leftovers exist)",
+    ],
+    "Breakfast": [
+        "pancakes with peanut butter + syrup",
+        "breakfast burrito (eggs, tots, cheese)",
+        "French toast sticks (frozen = win)",
+        "bagel + cream cheese + hot honey",
+        "breakfast quesadilla (eggs + salsa)",
+        "hash browns with cheese + scallions",
+        "overnight oats (if sober-you prepped)",
+        "breakfast sandwich (egg, cheese, sausage)",
+        "waffles + banana slices",
+        "cereal (no shame double bowl)",
+    ],
+    "Dessert": [
+        "cookie ice cream sandwich (warm the cookies!)",
+        "brownie à la mode",
+        "fried Oreos (pancake batter + fry)",
+        "milkshake (ice cream + milk + chaos)",
+        "cheesecake slices (store-bought hero)",
+        "rice krispie treats (microwave marshmallows)",
+        "banana split (classic)",
+        "pudding cup + crushed cookies",
+        "tiramisu (store-bought, still gas)",
+        "donut grilled on a pan (trust)",
+    ],
+    "Drinks": [
+        "iced lemonade + sprite (lazy Arnold Palmer-ish)",
+        "iced coffee with vanilla ice cream (float)",
+        "hot chocolate with marshmallows",
+        "seltzer + splash of juice",
+        "iced tea + mint",
+        "mango lassi (yogurt + mango + milk + sugar)",
+        "banana milkshake",
+        "chai latte (store mix is fine)",
+        "smoothie (frozen fruit + juice)",
+        "water. like, a lot of water 💧",
+    ],
+}
+
+
+def _food_pool_for(category: str) -> tuple[str, list[str]]:
+    """Return (label, pool) for a category or 'Surprise'."""
+    if category == "Surprise me" or category == "Surprise":
+        pool = []
+        for arr in FOOD_BY_CATEGORY.values():
+            pool.extend(arr)
+        return "Surprise", pool
+    return category, FOOD_BY_CATEGORY.get(category, [])
+
+def embed_food_suggestions(category: str, picks: list[str]) -> discord.Embed:
+    desc = "\n".join(f"• {x}" for x in picks)
+    e = discord.Embed(
+        title=f"🥡 Find Stoner Food — {category}",
+        description=desc,
+        color=0xF5A623
+    )
+    e.set_footer(text="Stoner Buddy • Munch responsibly")
+    return e
+
+
+
+def embed_movie_from(title: str, year: int, blurb: str, vibe_label: str, pool_size: int) -> discord.Embed:
+    e = discord.Embed(
+        title=f"🎬 {title} ({year})",
+        description=blurb,
+        color=0xE07B39  # warm cinema glow
+    )
+    e.set_footer(text=f"{vibe_label} pool size: {pool_size} films")
+    return e
+
+# ================== UI COMPONENTS ==================
+class BlinkerModal(discord.ui.Modal, title="Blinker Timer"):
+    seconds = discord.ui.TextInput(
+        label="Seconds (3–120)",
+        default="10",
+        required=True,
+        min_length=1,
+        max_length=3,
+        placeholder="10"
+    )
+
+    PRE_ROLL = 5  # warm-up seconds before the real countdown
+
+    async def on_submit(self, interaction: discord.Interaction):
+        # value is in self.seconds.value
+        try:
+            secs = int(self.seconds.value.strip())
+        except (ValueError, AttributeError):
+            await interaction.response.send_message("⚠️ Enter a number between 3 and 120.", ephemeral=True)
+            return
+        if secs < 3 or secs > 120:
+            await interaction.response.send_message("⚠️ Enter a number between 3 and 120.", ephemeral=True)
+            return
+
+        # send initial message
+        await interaction.response.send_message(
+            f"🌬️ **Blinker armed for {secs}s** — pre-roll starts now…"
+        )
+        msg = await interaction.original_response()
+
+        # --- pre-roll ---
+        for i in range(self.PRE_ROLL, 0, -1):
+            await asyncio.sleep(1)
+            await msg.edit(content=f"🌬️ **Get ready… {i}**")
+
+        # --- main countdown ---
+        for i in range(secs, 0, -1):
+            await asyncio.sleep(1)
+            await msg.edit(content=f"🌬️ **Blinker countdown: {i}…**")
+
+        # --- final message ---
+        endings = [
+            "🔥 Time’s up! Respect if you made it through 👏",
+            "🚀 You just left orbit, space cadet!",
+            "😮‍💨 Exhale, champion—lungs of steel!",
+            "🌌 That was cosmic, legend!",
+        ]
+        await msg.edit(content=random.choice(endings))
+
+        # --- delete after a short pause ---
+        await asyncio.sleep(3)  # gives user a moment to read the ending
+        try:
+            await msg.delete()
+        except discord.HTTPException:
+            pass  # if already gone or missing perms, ignore
+
+
+class HydrateReminderModal(discord.ui.Modal, title="Hydrate Reminder"):
+    delay = discord.ui.TextInput(
+        label="Remind me in… seconds (5–300)",
+        default="60",
+        min_length=1,
+        max_length=3,
+        required=True,
+        placeholder="e.g., 90"
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        # Parse and clamp
+        try:
+            secs = int(self.delay.value.strip())
+        except ValueError:
+            await interaction.response.send_message("⚠️ Enter a number between 5 and 300.", ephemeral=True)
+            return
+
+        if secs < 5 or secs > 300:
+            await interaction.response.send_message("⚠️ Enter a number between 5 and 300.", ephemeral=True)
+            return
+
+        guild = interaction.guild
+        channel = interaction.channel
+        user = interaction.user
+        if not guild or not channel:
+            await interaction.response.send_message("Couldn’t set a reminder here 🤔", ephemeral=True)
+            return
+
+        key = (guild.id, user.id)
+
+        # Cancel existing reminder for this user in this guild (if any)
+        old = USER_HYDRATE_TASKS.get(key)
+        if old and not old.done():
+            old.cancel()
+
+        # Create the reminder task
+        async def _reminder():
+            try:
+                await asyncio.sleep(secs)
+                try:
+                    await channel.send(
+                        f"{user.mention} 💧 Hydration time! Take a sip.",
+                        delete_after=10
+                    )
+                except discord.HTTPException:
+                    pass
+            except asyncio.CancelledError:
+                return
+            finally:
+                USER_HYDRATE_TASKS.pop(key, None)
+
+
+        task = asyncio.create_task(_reminder())
+        USER_HYDRATE_TASKS[key] = task
+
+        await interaction.response.send_message(
+            f"💧 Got it, {user.mention}! I’ll ping you in **{secs}**s.",
+            ephemeral=True
+        )
+
+class FoodRerollView(discord.ui.View):
+    def __init__(self, category_label: str):
+        super().__init__(timeout=60)  # ephemeral, no need to persist
+        self.category_label = category_label
+
+        btn = discord.ui.Button(label="🔁 Spin Again", style=discord.ButtonStyle.primary, custom_id=f"food_reroll:{category_label}")
+        async def reroll_cb(i: discord.Interaction):
+            label, pool = _food_pool_for(self.category_label)
+            picks = random.sample(pool, k=min(3, len(pool)))
+            await i.response.edit_message(embed=embed_food_suggestions(label, picks), view=FoodRerollView(label))
+        btn.callback = reroll_cb
+        self.add_item(btn)
+
+class FoodCategorySelect(discord.ui.Select):
+    def __init__(self):
+        options = [
+            discord.SelectOption(label="Sweet", emoji="🍫", description="Sugar rush time"),
+            discord.SelectOption(label="Salty", emoji="🥨", description="Savory snacks"),
+            discord.SelectOption(label="Quick", emoji="⚡", description="Under 5 min"),
+            discord.SelectOption(label="Gourmet", emoji="👨‍🍳", description="Chef energy"),
+            discord.SelectOption(label="Breakfast", emoji="🍳", description="AM (or PM) classics"),
+            discord.SelectOption(label="Dessert", emoji="🍰", description="Sweet finishers"),
+            discord.SelectOption(label="Drinks", emoji="🥤", description="Sip and chill"),
+            discord.SelectOption(label="Surprise me", emoji="🎲", description="Any category"),
+        ]
+        super().__init__(
+            placeholder="Find Stoner Food — pick a category…",
+            min_values=1, max_values=1,
+            options=options,
+            custom_id="food_category_select"
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        choice = self.values[0]
+        label, pool = _food_pool_for(choice)
+        if not pool:
+            await interaction.response.send_message("No munchies found (this should not happen).", ephemeral=True)
+            return
+        picks = random.sample(pool, k=min(3, len(pool)))
+        await interaction.response.send_message(
+            embed=embed_food_suggestions(label, picks),
+            view=FoodRerollView(label),
+            ephemeral=True
+        )
+
+# =========================
+# 🎵 Playlists + Safe Logging
+# =========================
+import asyncio, json, re, urllib.parse
+from pathlib import Path
+from collections import deque
+import discord
+from discord import app_commands
+from datetime import datetime, timezone
+
+# ---------- storage ----------
+PLAYLISTS_DIR = Path(__file__).parent / "playlists"
+PLAYLISTS_DIR.mkdir(exist_ok=True)
+MAX_PLAYLIST_LEN = 100
+
+# ---------- registry (expect these to exist; include if you don't already) ----------
+try:
+    GUILD_PLAYERS  # type: ignore
+except NameError:
+    GUILD_PLAYERS: dict[int, "GuildPlayer"] = {}
+
+def get_or_create_player(guild: discord.Guild) -> "GuildPlayer":
+    p = GUILD_PLAYERS.get(guild.id)
+    if p is None:
+        p = GuildPlayer(guild)          # adjust ctor if yours differs
+        GUILD_PLAYERS[guild.id] = p
+    return p
+
+# ---------- filename helpers ----------
+def _slugify(name: str) -> str:
+    s = name.strip().lower()
+    s = re.sub(r"[^a-z0-9 _-]", "", s)
+    s = re.sub(r"\s+", "-", s)
+    return s[:40] if s else "playlist"
+
+def _pl_path(guild_id: int, name: str) -> Path:
+    return PLAYLISTS_DIR / f"{guild_id}_{_slugify(name)}.json"
+
+def _pl_list_for_guild(guild_id: int) -> list[str]:
+    out: list[str] = []
+    for p in PLAYLISTS_DIR.glob(f"{guild_id}_*.json"):
+        out.append(p.stem.split("_", 1)[1])  # slug
+    return sorted(out)
+
+def _pl_save(guild_id: int, name: str, tracks: list[dict], author_id: int):
+    data = {
+        "name": name,
+        "slug": _slugify(name),
+        "guild_id": guild_id,
+        "created_by": author_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "tracks": tracks[:MAX_PLAYLIST_LEN],
+    }
+    with _pl_path(guild_id, name).open("w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+def _pl_load(guild_id: int, name: str) -> dict | None:
+    p = _pl_path(guild_id, name)
+    if not p.exists():
+        return None
+    with p.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+# ---------- safe music log ----------
+MUSIC_LOG_PATH = Path(__file__).parent / "music_log.jsonl"
+
+def _redact_media_url(url: str) -> str:
+    try:
+        u = urllib.parse.urlparse(url)
+        host = (u.netloc or "").lower()
+        if "youtube" in host or "youtu.be" in host:
+            q = urllib.parse.parse_qs(u.query)
+            vid = (q.get("v") or [""])[0]
+            return f"{host}/watch?v={vid[:6]}***" if vid else host
+        return host or "redacted"
+    except Exception:
+        return "redacted"
+
+def music_log(event: str, user: discord.abc.User | None, items: list[str] | None = None):
+    rec = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "event": event,
+        "user_id": getattr(user, "id", None),
+        "user": str(user) if user else None,
+        "items": items or [],
+    }
+    try:
+        with MUSIC_LOG_PATH.open("a", encoding="utf-8") as f:
+            json.dump(rec, f, ensure_ascii=False); f.write("\n")
+    except Exception as e:
+        print("[music_log] write error:", e)
+
+# ---------- queue snapshot ----------
+_QUEUE_ATTR_CANDIDATES = [
+    "queue", "upcoming", "tracks", "song_queue",
+    "play_queue", "playlist", "entries", "_queue"
+]
+
+def _len_queue_like(q) -> int:
+    if q is None: return 0
+    if isinstance(q, (list, tuple, deque)): return len(q)
+    if isinstance(q, asyncio.Queue):
+        inner = getattr(q, "_queue", None)
+        return len(inner) if isinstance(inner, deque) else 0
+    inner = getattr(q, "_queue", None)
+    if isinstance(inner, (list, tuple, deque)): return len(inner)
+    try: return len(q)
+    except Exception: return 0
+
+def _iter_queue_like(q):
+    if q is None: return
+    if isinstance(q, (list, tuple, deque)):
+        for x in q: yield x; return
+    if isinstance(q, asyncio.Queue):
+        inner = getattr(q, "_queue", None)
+        if isinstance(inner, deque):
+            for x in inner: yield x
+        return
+    inner = getattr(q, "_queue", None)
+    if isinstance(inner, (list, tuple, deque)):
+        for x in inner: yield x
+        return
+    try:
+        for x in q: yield x
+    except TypeError:
+        return
+
+def _coerce_track(item) -> dict | None:
+    if item is None: return None
+    if isinstance(item, dict):
+        url = (item.get("webpage_url") or item.get("url") or item.get("source") or item.get("uri"))
+        title = (item.get("title") or item.get("track") or item.get("name"))
+        return {"url": url, "title": title} if url else None
+    if isinstance(item, (list, tuple)) and item and isinstance(item[0], str):
+        url = item[0]; title = (item[1] if len(item) > 1 else None)
+        return {"url": url, "title": title}
+    url = (getattr(item, "webpage_url", None) or getattr(item, "url", None) or
+           getattr(item, "source", None) or getattr(item, "uri", None))
+    title = (getattr(item, "title", None) or getattr(item, "name", None))
+    return {"url": url, "title": title} if url else None
+
+def _smart_snapshot_player_queue(player) -> list:
+    now = getattr(player, "current", None) or getattr(player, "now_playing", None)
+    snap: list = []
+    if now:
+        c = _coerce_track(now)
+        if c and c.get("url"):
+            snap.append(now)
+    for attr in _QUEUE_ATTR_CANDIDATES:
+        q = getattr(player, attr, None)
+        n = _len_queue_like(q)
+        if n > 0:
+            snap.extend(list(_iter_queue_like(q)))
+            break
+    return snap
+
+# ---------- enqueue helper ----------
+async def _enqueue_track(player, url: str, requested_by: discord.abc.User):
+    for meth in ("enqueue", "add", "add_to_queue", "queue_url", "queue"):
+        fn = getattr(player, meth, None)
+        if callable(fn):
+            res = fn(url, requested_by=requested_by)
+            if asyncio.iscoroutine(res):
+                await res
+            return
+    raise RuntimeError("This GuildPlayer has no known enqueue method.")
+
+# ---------- command group ----------
+class PlaylistGroup(app_commands.Group):
+    def __init__(self):
+        super().__init__(name="playlist", description="Manage music playlists")
+
+playlist = PlaylistGroup()
+tree.add_command(playlist)
+
+# ---------- commands ----------
+@playlist.command(name="save", description="Save the current queue as a playlist")
+@app_commands.describe(name="Playlist name (e.g., chill, gaming, sesh)")
+async def playlist_save(interaction: discord.Interaction, name: str):
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    try:
+        if not interaction.guild:
+            await interaction.followup.send("Use this in a server.", ephemeral=True); return
+
+        player = GUILD_PLAYERS.get(interaction.guild.id) or get_or_create_player(interaction.guild)
+        if not player:
+            await interaction.followup.send("Music player isn’t initialized. Use `/join` first.", ephemeral=True); return
+
+        snap = _smart_snapshot_player_queue(player)
+        if not snap:
+            await interaction.followup.send("Queue is empty — nothing to save.", ephemeral=True); return
+
+        tracks: list[dict] = []
+        for item in snap[:MAX_PLAYLIST_LEN]:
+            t = _coerce_track(item)
+            if t and t.get("url"):
+                tracks.append(t)
+
+        if not tracks:
+            await interaction.followup.send("Couldn’t read tracks from the queue.", ephemeral=True); return
+
+        _pl_save(interaction.guild.id, name, tracks, interaction.user.id)
+        music_log("playlist_save", interaction.user, [f"{interaction.guild.id}:{_slugify(name)}", f"{len(tracks)} items"])
+        await interaction.followup.send(f"✅ Saved **{len(tracks)}** track(s) to **{_slugify(name)}**.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"⚠️ Failed to save playlist: {e}", ephemeral=True)
+
+@playlist.command(name="load", description="Load a saved playlist into the queue")
+@app_commands.describe(name="Name of the saved playlist")
+async def playlist_load(interaction: discord.Interaction, name: str):
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    try:
+        if not interaction.guild:
+            await interaction.followup.send("Use this in a server.", ephemeral=True); return
+
+        data = _pl_load(interaction.guild.id, name)
+        if not data:
+            await interaction.followup.send("No playlist by that name.", ephemeral=True); return
+
+        player = GUILD_PLAYERS.get(interaction.guild.id) or get_or_create_player(interaction.guild)
+        if not player:
+            await interaction.followup.send("Music player isn’t initialized. Use `/join` first.", ephemeral=True); return
+
+        count = 0
+        for t in data.get("tracks", [])[:MAX_PLAYLIST_LEN]:
+            url = t.get("url")
+            if not url: continue
+            try:
+                await _enqueue_track(player, url, requested_by=interaction.user)
+                count += 1
+            except Exception:
+                continue
+
+        music_log("playlist_load", interaction.user, [f"{interaction.guild.id}:{_slugify(name)}", f"{count} enqueued"])
+        await interaction.followup.send(f"📥 Loaded **{count}** track(s) from **{data.get('slug')}**.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"⚠️ Failed to load playlist: {e}", ephemeral=True)
+
+@playlist.command(name="list", description="Show saved playlists for this server")
+async def playlist_list(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    if not interaction.guild:
+        await interaction.followup.send("Use this in a server.", ephemeral=True); return
+    slugs = _pl_list_for_guild(interaction.guild.id)
+    if not slugs:
+        await interaction.followup.send("No playlists saved yet. Try `/playlist save name:chill`.", ephemeral=True); return
+    desc = "\n".join(f"• `{s}`" for s in slugs)
+    e = discord.Embed(title="🎶 Saved Playlists", description=desc, color=0x3498DB)
+    await interaction.followup.send(embed=e, ephemeral=True)
+
+@playlist.command(name="delete", description="Delete a saved playlist")
+@app_commands.describe(name="Name of the playlist to delete")
+async def playlist_delete(interaction: discord.Interaction, name: str):
+    await interaction.response.defer(ephemeral=True)
+    if not interaction.guild:
+        await interaction.followup.send("Use this in a server.", ephemeral=True); return
+    p = _pl_path(interaction.guild.id, name)
+    if not p.exists():
+        await interaction.followup.send("No playlist by that name.", ephemeral=True); return
+    try:
+        p.unlink()
+        music_log("playlist_delete", interaction.user, [f"{interaction.guild.id}:{_slugify(name)}"])
+        await interaction.followup.send(f"🗑️ Deleted playlist **{_slugify(name)}**.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"⚠️ Failed to delete: {e}", ephemeral=True)
+
+# Optional: owner-only debug to see where your queue actually lives
+@playlist.command(name="debugqueue", description="(Owner) Inspect which attribute holds the queue")
+@owner_only()
+async def playlist_debugqueue(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    if interaction.user.id != OWNER_ID:
+        await interaction.followup.send("🚫 Not allowed.", ephemeral=True); return
+    player = GUILD_PLAYERS.get(interaction.guild.id) if interaction.guild else None
+    if not player:
+        await interaction.followup.send("No player found; try `/join` first.", ephemeral=True); return
+    rows = []
+    for attr in _QUEUE_ATTR_CANDIDATES:
+        q = getattr(player, attr, None)
+        n = _len_queue_like(q)
+        if n:
+            first = next(_iter_queue_like(q), None)
+            shape = type(first).__name__ if first is not None else "None"
+            rows.append(f"`{attr}` → {n} items (first: {shape})")
+    if not rows:
+        rows = ["No queue-like attributes found with items."]
+    await interaction.followup.send("Queue candidates:\n" + "\n".join(rows), ephemeral=True)
+
+
+# ---------- commands ----------
+
+class StrainVibeSelect(Select):
+    def __init__(self):
+        options = [
+            discord.SelectOption(label="Chill", description="Indica-leaning, cozy vibes", emoji="🛋️"),
+            discord.SelectOption(label="Uplift", description="Energetic, chatty, creative", emoji="⚡"),
+            discord.SelectOption(label="Classic", description="Timeless legends", emoji="🏆"),
+            discord.SelectOption(label="Surprise me", description="Any vibe", emoji="🎲"),
+        ]
+        super().__init__(
+            placeholder="Pick a strain",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id="strain_vibe_select"
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        choice = self.values[0]
+        if choice == "Surprise me":
+            pool = [s for arr in STRAINS_BY_VIBE.values() for s in arr]
+            vibe_label = "Surprise"
+        else:
+            pool = STRAINS_BY_VIBE.get(choice, [])
+            vibe_label = choice
+
+        if not pool:
+            await interaction.response.send_message("No strains found for that vibe (weird).", ephemeral=True)
+            return
+
+        s = random.choice(pool)
+        emb = embed_strain_from(s["name"], s["type"], s["desc"])
+        emb.set_footer(text=f"{vibe_label} pool size: {len(pool)} strains")
+        await interaction.response.send_message(embed=emb, ephemeral=True)
+
+class MovieVibeSelect(Select):
+    def __init__(self):
+        options = [
+            discord.SelectOption(label="Chill", description="Cozy, low-stakes vibes", emoji="🛋️"),
+            discord.SelectOption(label="Comedy", description="Laughs first, plot second", emoji="😂"),
+            discord.SelectOption(label="Trippy", description="Mind-bending visuals", emoji="🌈"),
+            discord.SelectOption(label="Classics", description="All-time staples", emoji="🏆"),
+            discord.SelectOption(label="Animated", description="Stylized & comfy", emoji="🎨"),
+            discord.SelectOption(label="Surprise me", description="Any vibe", emoji="🎲"),
+        ]
+        super().__init__(
+            placeholder="Pick a movie",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id="movie_vibe_select"
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        choice = self.values[0]
+        if choice == "Surprise me":
+            pool = [m for arr in MOVIES_BY_VIBE.values() for m in arr]
+            vibe_label = "Surprise"
+        else:
+            pool = MOVIES_BY_VIBE.get(choice, [])
+            vibe_label = choice
+
+        if not pool:
+            await interaction.response.send_message("No movies found for that vibe (that’s odd).", ephemeral=True)
+            return
+
+        pick = random.choice(pool)
+        emb = embed_movie_from(pick["title"], pick["year"], pick["blurb"], vibe_label, len(pool))
+        await interaction.response.send_message(embed=emb, ephemeral=True)
+
+class StonerPanel(View):
+    """Polished multi-button control panel; persistent via custom_id and timeout=None."""
+    def __init__(self):
+        super().__init__(timeout=None)  # persistent
+
+        # --- Row 0: Wisdom / Munchies / Lucky ---
+        btn_wisdom = Button(label="More Wisdom 🌌", style=discord.ButtonStyle.primary, custom_id="wisdom_btn", row=0)
+        async def wisdom_cb(i: discord.Interaction):
+            await i.response.send_message(embed=embed_wisdom(), ephemeral=True)
+        btn_wisdom.callback = wisdom_cb
+        self.add_item(btn_wisdom)
+
+        btn_munch = Button(label="More Munchies 🍕", style=discord.ButtonStyle.secondary, custom_id="munch_btn", row=0)
+        async def munch_cb(i: discord.Interaction):
+            await i.response.send_message(embed=embed_munchie(), ephemeral=True)
+        btn_munch.callback = munch_cb
+        self.add_item(btn_munch)
+
+        btn_lucky = Button(label="Lucky Number 🔮", style=discord.ButtonStyle.success, custom_id="lucky_btn", row=0)
+        async def lucky_cb(i: discord.Interaction):
+            await i.response.send_message(embed=embed_lucky(), ephemeral=True)
+        btn_lucky.callback = lucky_cb
+        self.add_item(btn_lucky)
+
+        # --- Row 1: Quote / Blinker / Hydrate (NEW) ---
+        btn_quote = Button(label="Quote 💬", style=discord.ButtonStyle.secondary, custom_id="quote_btn", row=1)
+        async def quote_cb(i: discord.Interaction):
+            await i.response.send_message(embed=embed_quote(), ephemeral=True)
+        btn_quote.callback = quote_cb
+        self.add_item(btn_quote)
+
+        btn_blinker = Button(label="Blinker 🌬️", style=discord.ButtonStyle.danger, custom_id="blinker_btn", row=1)
+        async def blinker_cb(i: discord.Interaction):
+            await i.response.send_modal(BlinkerModal())
+        btn_blinker.callback = blinker_cb
+        self.add_item(btn_blinker)
+
+        # Hydrate reminder button → opens modal
+        btn_hydrate = Button(
+            label="Hydrate 💧",
+            style=discord.ButtonStyle.primary,
+            custom_id="hydrate_btn",
+            row=1
+        )
+
+        # NEW: Food Combos
+        btn_food = Button(label="Food Combos 🥡", style=discord.ButtonStyle.success, custom_id="food_btn", row=1)
+
+        async def food_cb(i: discord.Interaction):
+            # roll from "Surprise" pool
+            label, pool = _food_pool_for("Surprise")
+            picks = random.sample(pool, k=min(3, len(pool)))
+            await i.response.send_message(
+                embed=embed_food_suggestions(label, picks),
+                view=FoodRerollView(label),
+                ephemeral=True
+            )
+
+        btn_food.callback = food_cb
+        self.add_item(btn_food)
+
+        async def hydrate_cb(i: discord.Interaction):
+            await i.response.send_modal(HydrateReminderModal())
+
+        btn_hydrate.callback = hydrate_cb
+        self.add_item(btn_hydrate)
+
+
+        # --- Row 2: Strains ---
+        self.add_item(StrainVibeSelect())
+
+        # --- Row 3: Movies ---
+        self.add_item(MovieVibeSelect())
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return True
+
+
+# ================== SMALL HELPERS ==================
+def _fmt_duration(seconds: float) -> str:
+    seconds = int(seconds)
+    d, rem = divmod(seconds, 86400)
+    h, rem = divmod(rem, 3600)
+    m, s = divmod(rem, 60)
+    parts = []
+    if d: parts.append(f"{d}d")
+    if h: parts.append(f"{h}h")
+    if m: parts.append(f"{m}m")
+    parts.append(f"{s}s")
+    return " ".join(parts)
+
+def _count_today_commands() -> int:
+    try:
+        path = _log_path_for(datetime.now(timezone.utc))
+        if not path.exists():
+            return 0
+        with path.open("r", encoding="utf-8") as f:
+            return sum(1 for _ in f)
+    except Exception:
+        return 0
+
+
+def _haversine_miles(lat1, lon1, lat2, lon2) -> float:
+    R = 3958.8  # radius of Earth in miles
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlmb = math.radians(lon2 - lon1)
+    a = math.sin(dphi/2)**2 + math.cos(p1)*math.cos(p2)*math.sin(dlmb/2)**2
+    return 2*R*math.asin(math.sqrt(a))
+
+
+def _osm_geocode(location: str):
+    """Return (lat, lon, display_name) or raise RuntimeError."""
+    url = "https://nominatim.openstreetmap.org/search"
+    params = {"q": location, "format": "jsonv2", "limit": 1}
+    headers = {"User-Agent": OSM_USER_AGENT}
+    try:
+        r = requests.get(url, params=params, headers=headers, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        if not data:
+            raise RuntimeError("Couldn’t find that location.")
+        lat = float(data[0]["lat"]); lon = float(data[0]["lon"])
+        return lat, lon, data[0].get("display_name", location)
+    except requests.RequestException as e:
+        raise RuntimeError(f"Geocoding error: {e}")
+
+OSM_OVERPASS_ENDPOINTS = [
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.openstreetmap.ru/api/interpreter",
+]
+
+def _overpass_local_food(lat: float, lon: float, term: str | None, radius_m: int = 4800, limit: int = 5):
+    headers = {"User-Agent": OSM_USER_AGENT}
+    amenity_regex = "restaurant|fast_food|cafe|bakery|ice_cream"
+
+    def _esc(s: str) -> str:
+        return s.replace("\\", "\\\\").replace("\"", "\\\"")
+
+    name_filter = cuisine_filter = ""
+    if term:
+        t = _esc(term)
+        name_filter = f"[\"name\"~\"{t}\",i]"
+        cuisine_filter = f"[\"cuisine\"~\"{t}\",i]"
+
+    q = f"""
+    [out:json][timeout:25];
+    (
+      node["amenity"~"{amenity_regex}"]{name_filter}(around:{radius_m},{lat},{lon});
+      node["amenity"~"{amenity_regex}"]{cuisine_filter}(around:{radius_m},{lat},{lon});
+      way["amenity"~"{amenity_regex}"]{name_filter}(around:{radius_m},{lat},{lon});
+      way["amenity"~"{amenity_regex}"]{cuisine_filter}(around:{radius_m},{lat},{lon});
+    );
+    out center 60;
+    """
+
+    last_err = None
+    for ep in OSM_OVERPASS_ENDPOINTS:
+        try:
+            r = requests.post(ep, data=q, headers=headers, timeout=30)
+            r.raise_for_status()
+            data = r.json()
+            break
+        except requests.RequestException as e:
+            last_err = e
+            continue
+    else:
+        raise RuntimeError(f"Overpass error: {last_err}")
+
+    seen = set()
+    results = []
+    for el in data.get("elements", []):
+        tags = el.get("tags", {})
+        name = tags.get("name")
+        if not name:
+            continue
+        lat2 = el.get("lat") or (el.get("center") or {}).get("lat")
+        lon2 = el.get("lon") or (el.get("center") or {}).get("lon")
+        if lat2 is None or lon2 is None:
+            continue
+
+        key = (name, round(lat2, 5), round(lon2, 5))
+        if key in seen:
+            continue
+        seen.add(key)
+
+        addr = ", ".join(filter(None, [
+            tags.get("addr:housenumber"),
+            tags.get("addr:street"),
+            tags.get("addr:city"),
+            tags.get("addr:state"),
+            tags.get("addr:postcode"),
+        ])) or tags.get("addr:full") or ""
+
+        cuisine = tags.get("cuisine", "")
+        phone = tags.get("contact:phone") or tags.get("phone") or ""
+        website = tags.get("contact:website") or tags.get("website") or ""
+
+        # miles distance (you already switched your haversine)
+        dist_mi = _haversine_miles(lat, lon, lat2, lon2)
+
+        results.append({
+            "name": name,
+            "address": addr,
+            "cuisine": cuisine,
+            "phone": phone,
+            "website": website,
+            "lat": lat2,
+            "lon": lon2,
+            "distance_km": dist_mi,  # key name kept same as earlier; it's miles now
+        })
+
+    results.sort(key=lambda x: x["distance_km"])
+    return results[:limit]
+
+
+
+
+#========== NEW NO API FOOD NEAR YOU ==========
+
+def _embed_local_food_osm(term: str, location_label: str, items: list[dict]) -> discord.Embed:
+    title_term = term.title() if term else "Food"
+    if not items:
+        e = discord.Embed(
+            title=f"🥡 Local {title_term} near {location_label}",
+            description="No matching places found. Try a broader term or bigger radius.",
+            color=0xF39C12
+        )
+        if LOGO_URL: e.set_thumbnail(url=LOGO_URL)
+        e.set_footer(text="OpenStreetMap • Stoner Buddy")
+        return e
+
+    lines = []
+    for i, x in enumerate(items, 1):
+        km = f"{x['distance_km']:.1f} km"
+        maps = f"https://maps.google.com/?q={x['lat']},{x['lon']}"
+        cuisine = f" — {x['cuisine']}" if x.get("cuisine") else ""
+        phone = f" • {x['phone']}" if x.get("phone") else ""
+        web = f" • [Website]({x['website']})" if x.get("website") else ""
+        lines.append(
+            f"**{i}. [{x['name']}]({maps})** ({km}){cuisine}\n"
+            f"{x['address']}{phone}{web}"
+        )
+
+    e = discord.Embed(
+        title=f"🥡 Local {title_term} near {location_label}",
+        description="\n\n".join(lines),
+        color=0xF39C12
+    )
+    if LOGO_URL: e.set_thumbnail(url=LOGO_URL)
+    e.set_footer(text="OpenStreetMap • Stoner Buddy")
+    return e
+
+
+
+# ================== EVENTS ==================
+@bot.event
+async def on_ready():
+    await bot.change_presence(
+        status=discord.Status.online,
+        activity=discord.Game(name="Looking out for Stoner Buddys!✌")
+    )
+    bot.add_view(StonerPanel())
+    print("Persistent views registered.")
+
+    if DEV_GUILD_ID:
+        guild_obj = discord.Object(id=DEV_GUILD_ID)
+
+        # 👇 Mirror your GLOBAL commands into the dev guild for instant availability
+        tree.clear_commands(guild=guild_obj)          # clear old mirrors
+        tree.copy_global_to(guild=guild_obj)          # copy current globals → guild
+        synced = await tree.sync(guild=guild_obj)     # sync to that guild (instant)
+
+        print(f"✅ Mirrored & synced {len(synced)} commands to dev guild {DEV_GUILD_ID} (instant)")
+    else:
+        synced = await tree.sync()                    # global (slow rollout)
+        print(f"🌍 Synced {len(synced)} global commands (may take up to 1hr)")
+
+    print(f"🤖 Logged in as {bot.user} (ID: {bot.user.id})")
+
+
+
+
+# ================== SLASH COMMANDS ==================
+@tree.command(name="help", description="See what Stoner Buddy can do")
+async def help_cmd(interaction: discord.Interaction):
+    text = (
+        "🌿 **Stoner Buddy Commands** 🌿\n"
+        "/panel – open the control panel (buttons + strain & movie dropdowns)\n"
+        "/wisdom – cosmic nugget\n"
+        "/munchie – snack suggestion\n"
+        "/greet – friendly hello\n"
+        "/lucky – your lucky number\n"
+        "/quote – stoner quote with attribution\n"
+        "/add_wisdom <text> – add wisdom (persists)\n"
+        "/list_wisdoms – show how many + a small sample\n"
+        "/remove_wisdom <text> – remove a wisdom by exact text\n"
+        "/version – show bot version & uptime\n"
+        "/restart – restart the bot (owner only)\n"
+        "/rolljoint – Mini game where you roll a joint!\n"
+        "/localfood – Search's google, Finds food around you!\n"
+    )
+    await interaction.response.send_message(text, ephemeral=True)
+
+@tree.command(name="panel", description="Open the polished Stoner Buddy control panel")
+async def panel_cmd(interaction: discord.Interaction):
+    await interaction.response.send_message(embed=hero_panel_embed(), view=StonerPanel())
+
+@tree.command(name="wisdom", description="Get a nugget of stoner wisdom 🌌")
+async def wisdom_cmd(interaction: discord.Interaction):
+    await interaction.response.send_message(embed=embed_wisdom())
+
+@tree.command(name="munchie", description="Get a munchie suggestion 🍕")
+async def munchie_cmd(interaction: discord.Interaction):
+    await interaction.response.send_message(embed=embed_munchie())
+
+@tree.command(name="greet", description="Receive a random greeting ✌️")
+async def greet_cmd(interaction: discord.Interaction):
+    await interaction.response.send_message(embed=embed_greet(interaction.user))
+
+@tree.command(name="lucky", description="Get today’s lucky number 🔮")
+async def lucky_cmd(interaction: discord.Interaction):
+    await interaction.response.send_message(embed=embed_lucky())
+
+@tree.command(name="quote", description="Get a stoner quote with attribution 💬")
+async def quote_cmd(interaction: discord.Interaction):
+    await interaction.response.send_message(embed=embed_quote())
+
+@tree.command(name="add_wisdom", description="Add a new wisdom (persists)")
+@app_commands.describe(text="The wisdom to add")
+async def add_wisdom_cmd(interaction: discord.Interaction, text: str):
+    text = text.strip()
+    if not text:
+        await interaction.response.send_message("Give me some words to add, philosopher 🌿", ephemeral=True)
+        return
+    if text in WISDOMS:
+        await interaction.response.send_message("That wisdom already lives in the cloud ☁️", ephemeral=True)
+        return
+    WISDOMS.append(text)
+    save_wisdoms(WISDOMS)
+    await interaction.response.send_message(f"Added and saved: “{text}” ✨")
+
+@tree.command(name="list_wisdoms", description="See how many wisdoms exist + a small sample")
+async def list_wisdoms_cmd(interaction: discord.Interaction):
+    total = len(WISDOMS)
+    sample = "\n• " + "\n• ".join(WISDOMS[:5]) if total else " (none yet)"
+    msg = f"📚 We currently have **{total}** wisdoms.{sample if total else ''}"
+    await interaction.response.send_message(msg, ephemeral=True)
+
+@tree.command(name="remove_wisdom", description="Remove a wisdom by exact text")
+@app_commands.describe(text="Paste the exact wisdom to remove")
+async def remove_wisdom_cmd(interaction: discord.Interaction, text: str):
+    text = text.strip()
+    if text in WISDOMS:
+        WISDOMS.remove(text)
+        save_wisdoms(WISDOMS)
+        await interaction.response.send_message(f"🗑️ Removed: “{text}”", ephemeral=True)
+    else:
+        await interaction.response.send_message("Couldn't find that exact line. Make sure it matches.", ephemeral=True)
+
+@tree.command(name="version", description="Show Stoner Buddy version & uptime")
+async def version_cmd(interaction: discord.Interaction):
+    uptime = _fmt_duration(time.time() - START_TIME)
+    total_strains = sum(len(v) for v in STRAINS_BY_VIBE.values())
+    total_movies = sum(len(v) for v in MOVIES_BY_VIBE.values())
+    msg = (
+        f"🌿 **Stoner Buddy** v{VERSION}\n"
+        f"⏱️ Uptime: {uptime}\n"
+        f"📚 Wisdoms: {len(WISDOMS)}\n"
+        f"🌱 Strains: {total_strains} across {len(STRAINS_BY_VIBE)} vibes\n"
+        f"🎬 Movies: {total_movies} across {len(MOVIES_BY_VIBE)} vibes"
+    )
+    await interaction.response.send_message(msg, ephemeral=True)
+
+
+@tree.command(name="play", description="Play a song (YouTube link or search)")
+@app_commands.describe(query="YouTube URL or search terms")
+async def play_cmd(interaction: discord.Interaction, query: str):
+    ok, msg = in_same_vc_check(interaction)
+    if not ok:
+        await interaction.response.send_message(msg, ephemeral=True)
+        return
+    vc = interaction.guild.voice_client
+    if not vc:
+        # auto-join user's VC
+        await getattr(interaction.user.voice, "channel").connect()
+    await interaction.response.defer(ephemeral=True)
+    await interaction.followup.send("Searching Google While Packing my bong🌿...", ephemeral=True)
+    try:
+        track = await ytdlp_extract(query, interaction.user)
+    except Exception as e:
+        await interaction.followup.send(f"Couldn’t get that track: `{e}`", ephemeral=True)
+        return
+    player = get_player(interaction.guild)
+    await player.queue.put(track)
+    await player.ensure_task()
+    e = discord.Embed(title="🎵 Queued", description=f"[{track.title}]({track.webpage_url})", color=0x55CCAA)
+    e.set_footer(text=f"Requested by {interaction.user.display_name}")
+    await interaction.followup.send(embed=e)
+
+@tree.command(name="skip", description="Skip the current track")
+async def skip_cmd(interaction: discord.Interaction):
+    ok, msg = in_same_vc_check(interaction)
+    if not ok:
+        await interaction.response.send_message(msg, ephemeral=True)
+        return
+    player = get_player(interaction.guild)
+    player.stop()
+    await interaction.response.send_message("⏭️ Skipped.")
+
+@tree.command(name="pause", description="Pause playback")
+async def pause_cmd(interaction: discord.Interaction):
+    ok, msg = in_same_vc_check(interaction)
+    if not ok:
+        await interaction.response.send_message(msg, ephemeral=True)
+        return
+    vc = interaction.guild.voice_client
+    if vc and vc.is_playing():
+        vc.pause()
+        await interaction.response.send_message("⏸️ Paused.")
+    else:
+        await interaction.response.send_message("Nothing is playing.", ephemeral=True)
+
+@tree.command(name="resume", description="Resume playback")
+async def resume_cmd(interaction: discord.Interaction):
+    ok, msg = in_same_vc_check(interaction)
+    if not ok:
+        await interaction.response.send_message(msg, ephemeral=True)
+        return
+    vc = interaction.guild.voice_client
+    if vc and vc.is_paused():
+        vc.resume()
+        await interaction.response.send_message("▶️ Resumed.")
+    else:
+        await interaction.response.send_message("Nothing is paused.", ephemeral=True)
+
+@tree.command(name="stop", description="Stop and clear the queue")
+async def stop_cmd(interaction: discord.Interaction):
+    ok, msg = in_same_vc_check(interaction)
+    if not ok:
+        await interaction.response.send_message(msg, ephemeral=True)
+        return
+    player = get_player(interaction.guild)
+    # clear queue
+    cleared = 0
+    while not player.queue.empty():
+        try:
+            player.queue.get_nowait()
+            player.queue.task_done()
+            cleared += 1
+        except asyncio.QueueEmpty:
+            break
+    player.stop()
+    await interaction.response.send_message(f"⏹️ Stopped. Cleared **{cleared}** tracks from queue.")
+
+@tree.command(name="queue", description="Show the next tracks")
+async def queue_cmd(interaction: discord.Interaction):
+    player = get_player(interaction.guild)
+    items = list(player.queue._queue)  # peek only
+    if not items:
+        await interaction.response.send_message("Queue is empty.", ephemeral=True)
+        return
+    desc = "\n".join(f"{i+1}. {t.title} — requested by {t.requester.display_name}" for i, t in enumerate(items[:10]))
+    await interaction.response.send_message(embed=discord.Embed(title="🎶 Queue (next up)", description=desc, color=0x88D1A5))
+
+@tree.command(name="now", description="What’s playing now?")
+async def now_cmd(interaction: discord.Interaction):
+    player = get_player(interaction.guild)
+    t = player.current
+    if not t:
+        await interaction.response.send_message("Nothing playing.", ephemeral=True)
+        return
+    await interaction.response.send_message(embed=discord.Embed(title="🎧 Now Playing", description=f"[{t.title}]({t.webpage_url})", color=0x88D1A5))
+
+
+@tree.command(name="clearqueue", description="Clear all songs in the queue 🧹")
+async def clearqueue_cmd(interaction: discord.Interaction):
+    player = get_player(interaction.guild)
+    cleared = 0
+    while not player.queue.empty():
+        try:
+            player.queue.get_nowait()
+            player.queue.task_done()
+            cleared += 1
+        except asyncio.QueueEmpty:
+            break
+    await interaction.response.send_message(f"🧹 Cleared **{cleared}** songs from the queue.")
+
+
+
+@tree.command(name="roll", description="Roll a random number 🎲")
+@app_commands.describe(sides="How many sides should the dice have? Default = 6")
+async def roll_cmd(interaction: discord.Interaction, sides: int = 6):
+    if sides < 2:
+        await interaction.response.send_message("🎲 Dice need at least 2 sides!", ephemeral=True)
+        return
+    result = random.randint(1, sides)
+    await interaction.response.send_message(f"🎲 You rolled a **{result}** (1–{sides})")
+
+
+
+@tree.command(name="owner", description="DM me the bot owner's contact info")
+async def owner_cmd(interaction: discord.Interaction):
+    owner_mention = f"<@{OWNER_ID}>"
+    e = discord.Embed(
+        title="👑 Stoner Buddy — Owner Info",
+        description=(
+            f"Got questions, ideas, or bug reports?\n"
+            f"**Owner:** {owner_mention}\n\n"
+            "Use `/page_owner <message>` if you’d like me to DM the owner for you."
+        ),
+        color=0xF1C40F
+    )
+    e.set_footer(text="Stoner Buddy • Good vibes only")
+
+    try:
+        await interaction.user.send(embed=e)
+        await interaction.response.send_message("📨 I slid into your DMs with the owner info.", ephemeral=True)
+    except discord.Forbidden:
+        await interaction.response.send_message(
+            "⚠️ Couldn’t DM you (your DMs might be closed). Enable DMs from server members and try again.",
+            ephemeral=True
+        )
+
+
+@tree.command(name="page_owner", description="Page the bot owner with a message")
+@app_commands.describe(message="What should I send to the owner?")
+async def page_owner_cmd(interaction: discord.Interaction, message: str):
+    owner = bot.get_user(OWNER_ID)
+    if not owner:
+        try:
+            owner = await bot.fetch_user(OWNER_ID)
+        except Exception:
+            await interaction.response.send_message("⚠️ Couldn’t reach the owner.", ephemeral=True)
+            return
+
+    guild = interaction.guild.name if interaction.guild else "DMs"
+    author = f"{interaction.user} ({interaction.user.id})"
+
+    e = discord.Embed(
+        title="📨 Owner Page",
+        description=message,
+        color=0xE67E22
+    )
+    e.add_field(name="From", value=author, inline=False)
+    e.add_field(name="Server", value=guild, inline=False)
+
+    try:
+        await owner.send(embed=e)
+        await interaction.response.send_message("✅ Paged the owner. They’ll see your message soon.", ephemeral=True)
+    except discord.Forbidden:
+        await interaction.response.send_message("⚠️ Couldn’t DM the owner (they may have DMs closed).", ephemeral=True)
+
+
+@tree.command(name="say", description="Owner-only: make the bot say something in a channel")
+@app_commands.describe(channel="Where should I send the message?", message="What should I say?")
+@owner_only()
+async def say_cmd(interaction: discord.Interaction, channel: discord.TextChannel, message: str):
+    # Owner gate
+    if interaction.user.id != OWNER_ID:
+        await interaction.response.send_message("🚫 Not allowed.", ephemeral=True)
+        return
+
+    try:
+        await channel.send(message)
+        await interaction.response.send_message(
+            f"✅ Sent your message to {channel.mention}", ephemeral=True
+        )
+        print(f"[SAY] {interaction.user} -> #{channel} : {message}")
+    except discord.Forbidden:
+        await interaction.response.send_message(
+            f"⚠️ I don’t have permission to send messages in {channel.mention}",
+            ephemeral=True
+        )
+    except Exception as e:
+        await interaction.response.send_message(
+            f"⚠️ Failed to send message: {e}", ephemeral=True
+        )
+
+@tree.command(name="food", description="Find Stoner Food — 3 random suggestions by category")
+@app_commands.describe(category="Sweet, Salty, Quick, Gourmet, Breakfast, Dessert, Drinks, or 'Surprise me'")
+async def food_cmd(interaction: discord.Interaction, category: str):
+    cat_norm = category.strip().title()
+    valid = set(FOOD_BY_CATEGORY.keys()) | {"Surprise Me", "Surprise"}
+    if cat_norm not in valid:
+        cats = ", ".join(sorted(FOOD_BY_CATEGORY.keys()))
+        await interaction.response.send_message(
+            f"Pick a valid category: {cats}, or 'Surprise me'.",
+            ephemeral=True
+        )
+        return
+    label, pool = _food_pool_for(cat_norm)
+    picks = random.sample(pool, k=min(3, len(pool)))
+    await interaction.response.send_message(
+        embed=embed_food_suggestions(label, picks),
+        view=FoodRerollView(label),
+        ephemeral=True
+    )
+
+@tree.command(name="about", description="What is Stoner Buddy? Features, links, and stats.")
+async def about_cmd(interaction: discord.Interaction):
+    view = AboutLinks()
+    await interaction.response.send_message(embed=about_embed(OWNER_ID), view=view, ephemeral=True)
+
+@tree.command(name="localfood", description="Find local food spots by term & location (no API key needed)")
+@app_commands.describe(
+    term="What are you craving? e.g., tacos, pizza, dessert (optional)",
+    location="City, State or ZIP (e.g., Austin, TX or 90210)",
+    _haversine_miles="Search radius in miles (default=5)",
+    limit="How many results (default=5, max=10)"
+)
+async def localfood_cmd(
+    interaction: discord.Interaction,
+    location: str,
+    term: str | None = None,
+    _haversine_miles: float = 5.0,
+    limit: int = 5
+):
+    await interaction.response.defer(ephemeral=True, thinking=True)
+
+    # clamp inputs a bit
+    term = (term or "").strip()[:64] or None
+    location = location.strip()[:80]
+    _haversine_miles = max(1.0, min(_haversine_miles, 25.0))
+    limit = max(1, min(limit, 10))
+
+    try:
+        lat, lon, loc_label = _osm_geocode(location)
+        items = _overpass_local_food(lat, lon, term, radius_m=int(_haversine_miles * 1000), limit=limit)
+        emb = _embed_local_food_osm(term or "Food", loc_label, items)
+        await interaction.followup.send(embed=emb, ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"⚠️ {e}", ephemeral=True)
+
+# /rolljoint 
+@tree.command(name="rolljoint", description="Roll the joint — get a random result (each player gets a private outcome)")
+async def rolljoint_cmd(interaction: discord.Interaction):
+    e = discord.Embed(
+        title="🎯 Roll the Joint",
+        description="Click **Roll it! 🎲** and I’ll tell you how your joint turned out. Everyone gets their *own* private result.",
+        color=0x2ECC71
+    )
+    if LOGO_URL: e.set_thumbnail(url=LOGO_URL)
+    await interaction.response.send_message(embed=e, view=RollJointView())
+
+
+
+# ================== OWNER POWER CONTROLS ==================
+@tree.command(name="shutdown", description="Shut down the bot (owner only)")
+@owner_only()
+async def shutdown_cmd(interaction: discord.Interaction):
+    if interaction.user.id != OWNER_ID:
+        await interaction.response.send_message("🚫 You don’t have permission to do that.", ephemeral=True)
+        return
+    await interaction.response.send_message("👋 Powering down… see you later!", ephemeral=True)
+    await bot.close()
+    sys.exit(0)
+
+@tree.command(name="restart", description="Restart the bot (owner only)")
+@owner_only()
+async def restart_cmd(interaction: discord.Interaction):
+    if interaction.user.id != OWNER_ID:
+        await interaction.response.send_message("🚫 You don’t have permission to do that.", ephemeral=True)
+        return
+    await interaction.response.send_message("♻️ Restarting… one sec!", ephemeral=True)
+    await bot.close()
+    sys.exit(42)
+
+# ================== MUSIC / VOICE ==================
+import functools
+import yt_dlp
+
+
+import os
+
+FFMPEG_EXE = os.getenv("FFMPEG_EXE", r"C:\ffmpeg\bin\ffmpeg.exe")
+
+FFMPEG_OPTS = {
+    "before_options": "-nostdin",
+    "options": "-vn"
+}
+
+
+
+
+
+
+
+YTDL_OPTS = {
+    "format": "bestaudio/best",
+    "noplaylist": True,
+    "quiet": True,
+    "default_search": "ytsearch",
+    "source_address": "0.0.0.0",
+}
+
+ytdl = yt_dlp.YoutubeDL(YTDL_OPTS)
+
+
+# ====== Music player registry + join/leave commands ======
+
+import asyncio
+from collections import deque
+
+def _coerce_track(item) -> dict | None:
+    """Return {'url': ..., 'title': ...} from various item shapes."""
+    if item is None:
+        return None
+
+    # dict-like
+    if isinstance(item, dict):
+        url = item.get("url") or item.get("source") or item.get("uri")
+        title = item.get("title") or item.get("name")
+        return {"url": url, "title": title} if url else None
+
+    # string is a URL
+    if isinstance(item, str):
+        return {"url": item, "title": None}
+
+    # object with attributes
+    url = getattr(item, "url", None) or getattr(item, "source", None) or getattr(item, "uri", None)
+    title = getattr(item, "title", None) or getattr(item, "name", None)
+    return {"url": url, "title": title} if url else None
+
+def _snapshot_queue_like(q) -> list:
+    """
+    Safely snapshot common queue types without consuming them.
+    Supports: list/tuple, deque, asyncio.Queue (via _queue), custom with ._queue or .to_list()
+    """
+    if q is None:
+        return []
+
+    # If dev provided a method
+    to_list = getattr(q, "to_list", None)
+    if callable(to_list):
+        try:
+            return list(to_list())
+        except Exception:
+            pass
+
+    # Plain list/tuple
+    if isinstance(q, (list, tuple)):
+        return list(q)
+
+    # deque
+    if isinstance(q, deque):
+        return list(q)
+
+    # asyncio.Queue (CPython stores a deque at ._queue)
+    if isinstance(q, asyncio.Queue):
+        inner = getattr(q, "_queue", None)
+        if isinstance(inner, deque):
+            return list(inner)
+
+    # Custom objects that expose ._queue
+    inner = getattr(q, "_queue", None)
+    if isinstance(inner, (list, tuple, deque)):
+        return list(inner)
+
+    # Last resort: try iterating (may fail on true Queue)
+    try:
+        return list(q)
+    except TypeError:
+        return []
+
+# Try lots of likely attribute names that different music players use
+# ===== Playlist helpers =====
+import asyncio
+from collections import deque
+
+_QUEUE_ATTR_CANDIDATES = [
+    "queue", "upcoming", "tracks", "song_queue",
+    "play_queue", "playlist", "entries", "_queue"
+]
+
+def _len_queue_like(q) -> int:
+    ...
+
+def _iter_queue_like(q):
+    ...
+
+def _coerce_track(item) -> dict | None:
+    ...
+
+def _smart_snapshot_player_queue(player) -> list:
+    ...
+
+
+def _len_queue_like(q) -> int:
+    if q is None:
+        return 0
+    if isinstance(q, (list, tuple, deque)):
+        return len(q)
+    if isinstance(q, asyncio.Queue):
+        inner = getattr(q, "_queue", None)
+        return len(inner) if isinstance(inner, deque) else 0
+    inner = getattr(q, "_queue", None)
+    if isinstance(inner, (list, tuple, deque)):
+        return len(inner)
+    try:
+        return len(q)
+    except Exception:
+        return 0
+
+def _iter_queue_like(q):
+    """Yield items without consuming for list/tuple/deque/asyncio.Queue/_queue."""
+    if q is None:
+        return
+    if isinstance(q, (list, tuple, deque)):
+        for x in q: yield x
+        return
+    if isinstance(q, asyncio.Queue):
+        inner = getattr(q, "_queue", None)
+        if isinstance(inner, deque):
+            for x in inner: yield x
+        return
+    inner = getattr(q, "_queue", None)
+    if isinstance(inner, (list, tuple, deque)):
+        for x in inner: yield x
+        return
+    # Last resort: try iterating (may fail on true Queue)
+    try:
+        for x in q: yield x
+    except TypeError:
+        return
+
+def _coerce_track(item) -> dict | None:
+    """Return {'url','title'} from a bunch of common shapes."""
+    if item is None:
+        return None
+
+    # dict-like from ytdl/lavalink/etc
+    if isinstance(item, dict):
+        url = (item.get("webpage_url") or item.get("url") or
+               item.get("source") or item.get("uri"))
+        title = (item.get("title") or item.get("track") or
+                 item.get("name"))
+        return {"url": url, "title": title} if url else None
+
+    # (url, title) tuple
+    if isinstance(item, (list, tuple)) and item and isinstance(item[0], str):
+        url = item[0]; title = (item[1] if len(item) > 1 else None)
+        return {"url": url, "title": title}
+
+    # object with attributes
+    url = (getattr(item, "webpage_url", None) or getattr(item, "url", None) or
+           getattr(item, "source", None) or getattr(item, "uri", None))
+    title = (getattr(item, "title", None) or getattr(item, "name", None))
+    return {"url": url, "title": title} if url else None
+
+
+
+# One music player per guild
+GUILD_PLAYERS: dict[int, "GuildPlayer"] = {}
+
+def get_or_create_player(guild: discord.Guild) -> "GuildPlayer":
+    """
+    Returns the GuildPlayer for this guild, creating and registering one if needed.
+    Adjust the constructor if your GuildPlayer requires different args.
+    """
+    player = GUILD_PLAYERS.get(guild.id)
+    if player is None:
+        # If your GuildPlayer expects (guild, voice_client) change to: GuildPlayer(guild, guild.voice_client)
+        player = GuildPlayer(guild)
+        GUILD_PLAYERS[guild.id] = player
+    return player
+
+
+@tree.command(name="join", description="Make the bot join your current voice channel")
+async def join_cmd(interaction: discord.Interaction):
+    # Must be called in a server
+    if not interaction.guild:
+        await interaction.response.send_message("Use this in a server.", ephemeral=True)
+        return
+
+    # User must be in a VC
+    user_vc = getattr(getattr(interaction.user, "voice", None), "channel", None)
+    if not user_vc:
+        await interaction.response.send_message("You need to be in a voice channel first.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True, thinking=True)
+
+    # Connect or move the bot
+    vc = interaction.guild.voice_client
+    try:
+        if vc and vc.channel != user_vc:
+            await vc.move_to(user_vc)
+        elif not vc:
+            vc = await user_vc.connect()
+    except RuntimeError as e:
+        # Common case: PyNaCl not installed
+        await interaction.followup.send(f"⚠️ Voice connect error: {e}\nTip: `pip install PyNaCl`", ephemeral=True)
+        return
+    except discord.Forbidden:
+        await interaction.followup.send("⚠️ I don’t have permission to join/speak in that channel.", ephemeral=True)
+        return
+    except Exception as e:
+        await interaction.followup.send(f"⚠️ Couldn’t join the voice channel: {e}", ephemeral=True)
+        return
+
+    # Create/register GuildPlayer and bind the current voice client if your class uses it
+    player = get_or_create_player(interaction.guild)
+    # If your GuildPlayer stores the voice client, keep this; otherwise remove:
+    try:
+        setattr(player, "voice", vc)  # change attribute name if your class uses a different one
+    except Exception:
+        pass
+
+    await interaction.followup.send(f"✅ Joined {user_vc.mention}. Ready to play!", ephemeral=True)
+
+
+@tree.command(name="leave", description="Make the bot leave the voice channel")
+async def leave_cmd(interaction: discord.Interaction):
+    if not interaction.guild:
+        await interaction.response.send_message("Use this in a server.", ephemeral=True)
+        return
+
+    vc = interaction.guild.voice_client
+    if not vc:
+        await interaction.response.send_message("I’m not in a voice channel.", ephemeral=True)
+        return
+
+    try:
+        await vc.disconnect(force=True)
+    finally:
+        # Stop/cleanup the player for this guild
+        player = GUILD_PLAYERS.pop(interaction.guild.id, None)
+        # If your GuildPlayer has a teardown/stop method, call it safely
+        if player and hasattr(player, "teardown"):
+            try:
+                maybe_coro = player.teardown()
+                if asyncio.iscoroutine(maybe_coro):
+                    await maybe_coro
+            except Exception:
+                pass
+
+    await interaction.response.send_message("👋 Left the voice channel.", ephemeral=True)
+
+
+
+
+class Track:
+    def __init__(self, url: str, title: str, webpage_url: str, requester: discord.User):
+        self.url = url
+        self.title = title
+        self.webpage_url = webpage_url
+        self.requester = requester
+
+class GuildPlayer:
+    def __init__(self, guild: discord.Guild):
+        self.guild = guild
+        self.queue: asyncio.Queue[Track] = asyncio.Queue()
+        self.next_event = asyncio.Event()
+        self.current: Track | None = None
+        self.player_task: asyncio.Task | None = None
+
+    async def ensure_task(self):
+        if self.player_task is None or self.player_task.done():
+            self.player_task = asyncio.create_task(self.player_loop())
+
+    async def player_loop(self):
+        while True:
+            self.next_event.clear()
+            self.current = await self.queue.get()
+            source = discord.FFmpegPCMAudio(self.current.url, executable=FFMPEG_EXE, **FFMPEG_OPTS)
+            vc = self.guild.voice_client
+            if not vc:
+                # no vc => drop track
+                continue
+            def after_play(err):
+                if err:
+                    print("Audio error:", err)
+                bot.loop.call_soon_threadsafe(self.next_event.set)
+            vc.play(source, after=after_play)
+            await self.next_event.wait()
+
+    def stop(self):
+        vc = self.guild.voice_client
+        if vc and vc.is_playing():
+            vc.stop()
+
+PLAYERS: dict[int, GuildPlayer] = {}
+
+def get_player(guild: discord.Guild) -> GuildPlayer:
+    gp = PLAYERS.get(guild.id)
+    if not gp:
+        gp = GuildPlayer(guild)
+        PLAYERS[guild.id] = gp
+    return gp
+
+async def ytdlp_extract(query: str, requester: discord.User) -> Track:
+    loop = asyncio.get_running_loop()
+    data = await loop.run_in_executor(None, functools.partial(ytdl.extract_info, query, download=False))
+    if "entries" in data:
+        data = data["entries"][0]
+    stream_url = data.get("url")
+    title = data.get("title") or "Unknown"
+    page = data.get("webpage_url") or query
+    return Track(stream_url, title, page, requester)
+
+def in_same_vc_check(interaction: discord.Interaction) -> tuple[bool, str | None]:
+    user_vc = getattr(interaction.user.voice, "channel", None)
+    bot_vc = getattr(interaction.guild.voice_client, "channel", None)
+    if not user_vc:
+        return False, "You need to be **in a voice channel** first."
+    if bot_vc and bot_vc != user_vc:
+        return False, f"I'm already in **{bot_vc}**. Join me there!"
+    return True, None
+
+#========== Music Logging ==============
+
+MUSIC_LOG_PATH = Path(__file__).parent / "music_log.jsonl"
+
+def _redact_media_url(url: str) -> str:
+    try:
+        u = urllib.parse.urlparse(url)
+        host = (u.netloc or "").lower()
+        if "youtube" in host or "youtu.be" in host:
+            q = urllib.parse.parse_qs(u.query)
+            vid = (q.get("v") or [""])[0]
+            return f"{host}/watch?v={vid[:6]}***" if vid else host
+        if host:
+            return host  # keep only host for non-YouTube
+    except Exception:
+        pass
+    return "redacted"
+
+def music_log(event: str, user: discord.abc.User | None, items: list[str] | None = None):
+    rec = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "event": event,
+        "user_id": getattr(user, "id", None),
+        "user": str(user) if user else None,
+        "items": items or [],
+    }
+    try:
+        with MUSIC_LOG_PATH.open("a", encoding="utf-8") as f:
+            json.dump(rec, f, ensure_ascii=False); f.write("\n")
+    except Exception as e:
+        print("[music_log] write error:", e)
+
+
+
+
+# ================== RUN ==================
+if __name__ == "__main__":
+    print("[Stoner Buddy] Starting…")
+    bot.run(TOKEN)
