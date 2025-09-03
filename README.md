@@ -2,7 +2,7 @@
   <img src="Banner.png" alt="Stoner Buddy Discord Bot" width="100%">
 </p>
 
-# Stoner Buddy V3.2.7 Install
+# Stoner Buddy V4.0.0 Install
 
 **Stoner Buddy** is a Discord bot built for chill vibes, laughs, and stoner-friendly fun.  
 It’s part entertainment, part utility — all good vibes. ✌️
@@ -25,7 +25,7 @@ It’s part entertainment, part utility — all good vibes. ✌️
 - 💧 **Hydrate Reminder** – keep your cottonmouth in check
 - 🎵 **Music Player** – play, queue, skip songs in VC
 - 🛠️ **Owner Tools** – `/say`, `/control`, `/shutdown`, logging
-
+- 🌺 **Better Play Back**
 ---
 
 ## 🖼️ Panel UI
