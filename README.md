@@ -35,6 +35,10 @@ Use `/panel` to open Stoner Buddy’s **interactive control panel**:
 - Dropdowns: Strains, Movies, Food categories  
 - Logo + banner for that polished vibe
 
+<p align="center">
+  <img src="showcase.png" alt="Stoner Buddy Discord Bot" width="50%">
+</p>
+
 ---
 
 ## 🚀 Getting Started
